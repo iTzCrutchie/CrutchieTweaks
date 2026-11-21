@@ -2,7 +2,7 @@
 ## Title: |cff00ccffCrutchie|rTweaks
 ## Notes: Personal UI tweaks and quality-of-life improvements for WoW: Forever.
 ## Author: Crutchie
-## Version: 0.0.2
+## Version: @project-versioon@
 ## Category: Tweaks
 ## IconTexture: Interface\AddOns\CrutchieTweaks\Media\CrutchieTweaks
 ## SavedVariables: CrutchieTweaksDB
@@ -14,3 +14,6 @@ Core\Core.lua
 # Modules
 Modules\HideRaidManager.lua
 Modules\FarmTimer.lua
+Modules\Options.lua
+Modules\MinimapButton.lua
+Modules\VersionCheck.lua

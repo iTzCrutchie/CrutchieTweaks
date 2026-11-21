@@ -1,0 +1,10 @@
+package-as: CrutchieTweaks
+
+ignore:
+  - README.md
+  - CHANGELOG.md
+  - .gitignore
+  - .github
+  - Modules/Template.lua
+  - Media/*.png
+  - Media/*.webp

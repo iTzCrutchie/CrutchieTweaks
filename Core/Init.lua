@@ -1,33 +1,45 @@
 local addonName, ns = ...
 
 ns.AddonName = addonName
-ns.Modules = {}
+ns.Modules   = {}
 
--- Colors
 ns.Colors = {
-    cyan = "|cff00ccff", -- Cyan
-    green  = "|cff00ff00", -- Green
-    red    = "|cffff3333", -- Soft Bright Red
+    prefix = "|cff00ccff[CrutchieTweaks]|r ",
+    green  = "|cff00ff00",
+    red    = "|cffff3333",
+    yellow = "|cffffff00",
     reset  = "|r",
 }
 
--- Default SavedVariables
 ns.Defaults = {
-    hideRaidManager = false,
-    farmTimer       = true,
-    timerDungeonMode = true,
-    timerPos        = { point = "CENTER", x = 0, y = 120 },
+    hideRaidManager    = false,
+    farmTimer          = true,
+    timerDungeonMode   = true,
+    timerVendorOnly    = false,
+    timerLootOpen      = false,
+    timerLootMinQual   = 0,                 -- 0=All, 1=Common+, 2=Uncommon+, 3=Rare+, 4=Epic+, 5=Legendary+
+    timerTheme         = "dark",            -- "dark" or "classic"
+    timerFont          = "Friz Quadrata",   -- Built-in Blizzard fonts (+ Expressway if LibSharedMedia is loaded)
+    timerFontSize      = 11,                -- Numeric pixel size (8 - 64)
+    timerLocked        = false,
+    timerAutoStart     = true,
+    timerMinimap       = true,
+    timerMinimapAngle  = 220,
+    timerPos           = { point = "CENTER", x = 0, y = 120 },
+
+    -- UI Element Toggles
+    showTotalGold      = true,
+    showTotalRuns      = true,
+    showRunsPerHour    = true,
+    showFastestRun     = true,
+    showLockoutWarning = true,
 }
 
--- Reusable chat print helper
-function ns:Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage(
-        ns.Colors.cyan .. "Crutchie" .. ns.Colors.reset .. "Tweaks: " .. tostring(msg)
-    )
+function ns:RegisterModule(name, tbl)
+    self.Modules[name] = tbl
+    return tbl
 end
 
--- Helper to register modules cleanly
-function ns:RegisterModule(name, moduleTable)
-    self.Modules[name] = moduleTable
-    return moduleTable
+function ns:Print(msg)
+    DEFAULT_CHAT_FRAME:AddMessage(self.Colors.prefix .. tostring(msg))
 end

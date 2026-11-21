@@ -2,6 +2,9 @@ local _, ns = ...
 
 local mod = ns:RegisterModule("FarmTimer", {})
 
+local BASE_FONT_SIZE = 11
+local BASE_WIDTH     = 276
+
 -- Active state table (persisted in CrutchieTweaksDB.timerState across /reload)
 local state = {
     isRunning      = false,
@@ -17,6 +20,7 @@ local state = {
     ahCopper       = 0,
     lastSaveTime   = nil,
     lootLog        = {},
+    runTimestamps  = {},
 }
 
 -- Openable clams / containers whose contents fire a second CHAT_MSG_LOOT when auto-opened
@@ -31,12 +35,22 @@ local OPENABLE_CONTAINERS = {
     [52340] = true, -- Abyssal Clam
 }
 
+local QUALITY_FILTERS = {
+    { minQ = 0, label = "|cffccccccAll|r" },
+    { minQ = 1, label = "|cffffffffCommon+|r" },
+    { minQ = 2, label = "|cff1eff00Uncommon+|r" },
+    { minQ = 3, label = "|cff0070ddRare+|r" },
+    { minQ = 4, label = "|cffa335eeEpic+|r" },
+    { minQ = 5, label = "|cffff8000Legendary+|r" },
+}
+
 local debugMode    = false
 local uiFrame      = nil
 local lootFrame    = nil
 local lootRows     = {}
 local postMenu     = nil
 local pendingItems = {}
+local wasInDungeon = false
 
 local function DebugPrint(msg)
     if debugMode then
@@ -44,7 +58,6 @@ local function DebugPrint(msg)
     end
 end
 
--- Cross-client safe GetItemInfo wrapper (supports 1.60.1 C_Item.GetItemInfo and legacy GetItemInfo)
 local function SafeGetItemInfo(item)
     if _G.C_Item and _G.C_Item.GetItemInfo then
         return _G.C_Item.GetItemInfo(item)
@@ -54,24 +67,18 @@ local function SafeGetItemInfo(item)
     return nil
 end
 
--- Sync local state pointer with SavedVariables
 local function InitSavedState()
     CrutchieTweaksDB.timerState = CrutchieTweaksDB.timerState or {}
     local saved = CrutchieTweaksDB.timerState
 
     for k, defaultVal in pairs(state) do
         if saved[k] == nil then
-            if type(defaultVal) == "table" then
-                saved[k] = {}
-            else
-                saved[k] = defaultVal
-            end
+            saved[k] = (type(defaultVal) == "table") and {} or defaultVal
         end
     end
 
-    if type(saved.lootLog) ~= "table" then
-        saved.lootLog = {}
-    end
+    if type(saved.lootLog) ~= "table" then saved.lootLog = {} end
+    if type(saved.runTimestamps) ~= "table" then saved.runTimestamps = {} end
 
     state = saved
 
@@ -87,7 +94,6 @@ local function InitSavedState()
     state.lastSaveTime = GetTime()
 end
 
--- Format copper into compact gold/silver/copper string (UI display with colors)
 local function FormatMoneyUI(copper)
     copper = math.floor(copper or 0)
     local g = math.floor(copper / 10000)
@@ -103,7 +109,6 @@ local function FormatMoneyUI(copper)
     end
 end
 
--- Plain text money formatting for Chat posting
 local function FormatMoneyPlain(copper)
     copper = math.floor(copper or 0)
     local g = math.floor(copper / 10000)
@@ -119,7 +124,6 @@ local function FormatMoneyPlain(copper)
     end
 end
 
--- Format seconds into HH:MM:SS or MM:SS
 local function FormatTime(sec)
     if not sec then return "--:--" end
     sec = math.floor(sec)
@@ -133,7 +137,6 @@ local function FormatTime(sec)
     end
 end
 
--- Parse copper directly from CHAT_MSG_MONEY
 local function ParseLootedCoin(msg)
     if not msg then return 0 end
     if not (string.find(msg, "You loot", 1, true) or string.find(msg, "Your share of the loot", 1, true)) then
@@ -147,7 +150,6 @@ local function ParseLootedCoin(msg)
     return (gold * 10000) + (silver * 100) + copper
 end
 
--- Lookup Auction House price via TSM or Auctionator (skips AH for Soulbound/BoP items)
 local function GetItemAHValue(itemID, cleanLink, vendorUnitPrice, isBoP)
     if isBoP then
         return vendorUnitPrice or 0
@@ -156,7 +158,6 @@ local function GetItemAHValue(itemID, cleanLink, vendorUnitPrice, isBoP)
     local ahUnit = 0
     local tsmItemString = itemID and ("i:" .. itemID) or nil
 
-    -- 1. Try TradeSkillMaster (TSM)
     if _G.TSM_API and _G.TSM_API.GetCustomPriceValue and tsmItemString then
         local okMin, minVal = pcall(_G.TSM_API.GetCustomPriceValue, "DBMinBuyout", tsmItemString)
         if okMin and type(minVal) == "number" and minVal > 0 then
@@ -169,7 +170,6 @@ local function GetItemAHValue(itemID, cleanLink, vendorUnitPrice, isBoP)
         end
     end
 
-    -- 2. Fallback to Auctionator
     if ahUnit == 0 and _G.Auctionator and _G.Auctionator.API and _G.Auctionator.API.v1 then
         if itemID and _G.Auctionator.API.v1.GetAuctionPriceByItemID then
             local ok, val = pcall(_G.Auctionator.API.v1.GetAuctionPriceByItemID, "CrutchieTweaks", itemID)
@@ -193,19 +193,28 @@ local function GetItemAHValue(itemID, cleanLink, vendorUnitPrice, isBoP)
 end
 
 local function IsDungeonMode()
-    if ns.db.timerDungeonMode == nil then
-        ns.db.timerDungeonMode = true
-    end
+    if ns.db.timerDungeonMode == nil then ns.db.timerDungeonMode = true end
     return ns.db.timerDungeonMode
 end
 
--- Valuation mode: false = AH + Raw Coin (default), true = Vendor + Raw Coin
 local function IsVendorOnlyMode()
     return ns.db.timerVendorOnly == true
 end
 
 local function IsLootPanelOpen()
     return ns.db.timerLootOpen == true
+end
+
+local function GetHourlyRunCount()
+    local now = time()
+    local fresh = {}
+    for _, ts in ipairs(state.runTimestamps) do
+        if (now - ts) < 3600 then
+            table.insert(fresh, ts)
+        end
+    end
+    state.runTimestamps = fresh
+    return #fresh
 end
 
 local function StartNextRun()
@@ -217,29 +226,154 @@ local function StartNextRun()
         end
         state.completedRuns = state.completedRuns + 1
         state.runCount      = state.runCount + 1
+        table.insert(state.runTimestamps, time())
     end
     state.runTime = 0
 end
 
--- Populate and sort the collapsible loot window
+local function ApplyBackdropTheme(frame, isTab)
+    if not frame or not frame.SetBackdrop then return end
+    if ns.db.timerTheme == "classic" then
+        frame:SetBackdrop({
+            bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile     = true,
+            tileSize = 32,
+            edgeSize = isTab and 12 or 16,
+            insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+        })
+        frame:SetBackdropColor(1, 1, 1, 0.95)
+        frame:SetBackdropBorderColor(0.85, 0.75, 0.55, 1)
+    else
+        frame:SetBackdrop({
+            bgFile   = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            tile     = false,
+            edgeSize = 1,
+        })
+        frame:SetBackdropColor(0.06, 0.06, 0.08, 0.92)
+        frame:SetBackdropBorderColor(0.2, 0.2, 0.25, 1)
+    end
+end
+
+local function ApplyTheme()
+    ApplyBackdropTheme(uiFrame, false)
+    ApplyBackdropTheme(lootFrame, false)
+    ApplyBackdropTheme(uiFrame and uiFrame.lootToggleBtn, true)
+    ApplyBackdropTheme(postMenu, false)
+end
+
+local function ApplyLockState()
+    if not uiFrame then return end
+    local locked = (ns.db.timerLocked == true)
+
+    if uiFrame.resizeBtn then
+        if locked then
+            uiFrame.resizeBtn:Hide()
+        else
+            uiFrame.resizeBtn:Show()
+        end
+    end
+
+    if uiFrame.lockBtn then
+        if locked then
+            uiFrame.lockBtn:SetNormalTexture("Interface\\Buttons\\LockButton-Locked-Up")
+            uiFrame.lockBtn:SetPushedTexture("Interface\\Buttons\\LockButton-Locked-Down")
+        else
+            uiFrame.lockBtn:SetNormalTexture("Interface\\Buttons\\LockButton-Unlocked-Up")
+            uiFrame.lockBtn:SetPushedTexture("Interface\\Buttons\\LockButton-Unlocked-Down")
+        end
+    end
+end
+
+local function GetSelectedFontPath()
+    local selected = ns.db.timerFont or "Friz Quadrata"
+    if ns.GetAvailableFonts then
+        for _, fInfo in ipairs(ns.GetAvailableFonts()) do
+            if fInfo.name == selected then
+                return fInfo.path
+            end
+        end
+    end
+    return STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+end
+
+local function ApplyFontSize()
+    if not uiFrame then return end
+
+    local targetPx = tonumber(ns.db.timerFontSize) or BASE_FONT_SIZE
+    if targetPx < 8 then targetPx = 8 elseif targetPx > 64 then targetPx = 64 end
+
+    local fontPath = GetSelectedFontPath()
+
+    uiFrame.title:SetFont(fontPath, 13, "OUTLINE")
+    uiFrame.sessionTimerText:SetFont(fontPath, 16, "OUTLINE")
+    uiFrame.runTimerText:SetFont(fontPath, 16, "OUTLINE")
+    uiFrame.sessionLabel:SetFont(fontPath, 11, "")
+    uiFrame.runLabel:SetFont(fontPath, 11, "")
+    uiFrame.valModeLbl:SetFont(fontPath, 11, "")
+
+    for _, row in ipairs(uiFrame.allStatRows) do
+        row.lbl:SetFont(fontPath, 11, "")
+        row.val:SetFont(fontPath, 11, "")
+    end
+
+    if lootFrame then
+        lootFrame.header:SetFont(fontPath, 13, "OUTLINE")
+        for _, lRow in ipairs(lootRows) do
+            lRow.nameText:SetFont(fontPath, 11, "")
+            lRow.valText:SetFont(fontPath, 11, "")
+        end
+    end
+
+    local newScale = targetPx / BASE_FONT_SIZE
+    local oldScale = uiFrame:GetScale() or 1
+    if math.abs(newScale - oldScale) > 0.001 then
+        local left = uiFrame:GetLeft()
+        local top  = uiFrame:GetTop()
+        uiFrame:SetScale(newScale)
+        if left and top then
+            local screenLeft = left * oldScale
+            local screenTop  = top * oldScale
+            uiFrame:ClearAllPoints()
+            uiFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", screenLeft / newScale, screenTop / newScale)
+            ns.db.timerPos = {
+                point = "TOPLEFT",
+                x     = screenLeft / newScale,
+                y     = screenTop / newScale,
+            }
+        end
+    end
+end
+
 local function UpdateLootList()
     if not lootFrame or not lootFrame:IsShown() then return end
 
     local useVendor = IsVendorOnlyMode()
-    local sorted = {}
+    local minQual   = ns.db.timerLootMinQual or 0
+    local sorted    = {}
     local totalItemCount = 0
 
     for _, entry in pairs(state.lootLog) do
-        local unitVal = useVendor and (entry.vendorUnit or 0) or (entry.ahUnit or 0)
-        local rowVal  = unitVal * (entry.count or 1)
-        totalItemCount = totalItemCount + (entry.count or 1)
-        table.insert(sorted, {
-            entry    = entry,
-            totalVal = rowVal,
-        })
+        if entry.quality == nil and entry.itemID then
+            local _, _, fetchedQuality = SafeGetItemInfo(entry.itemID)
+            if fetchedQuality then
+                entry.quality = fetchedQuality
+            end
+        end
+
+        local q = entry.quality or 1
+        if q >= minQual then
+            local unitVal = useVendor and (entry.vendorUnit or 0) or (entry.ahUnit or 0)
+            local rowVal  = unitVal * (entry.count or 1)
+            totalItemCount = totalItemCount + (entry.count or 1)
+            table.insert(sorted, {
+                entry    = entry,
+                totalVal = rowVal,
+            })
+        end
     end
 
-    -- Sort highest value items to the top
     table.sort(sorted, function(a, b)
         if a.totalVal ~= b.totalVal then
             return a.totalVal > b.totalVal
@@ -247,7 +381,14 @@ local function UpdateLootList()
         return (a.entry.name or "") < (b.entry.name or "")
     end)
 
-    lootFrame.header:SetText(string.format("|cff00ccffSession Loot|r |cffaaaaaa(%d)|r", totalItemCount))
+    lootFrame.header:SetText(string.format("|cff00ccffLoot|r |cffaaaaaa(%d)|r", totalItemCount))
+
+    for _, qf in ipairs(QUALITY_FILTERS) do
+        if qf.minQ == minQual then
+            lootFrame.filterBtn:SetText(qf.label)
+            break
+        end
+    end
 
     if #sorted == 0 then
         lootFrame.emptyText:Show()
@@ -255,16 +396,14 @@ local function UpdateLootList()
         lootFrame.emptyText:Hide()
     end
 
+    local fontPath = GetSelectedFontPath()
     local rowHeight = 20
     for i, itemData in ipairs(sorted) do
         local row = lootRows[i]
         if not row then
             row = CreateFrame("Button", nil, lootFrame.scrollChild)
             row:SetHeight(rowHeight)
-            row:SetPoint("LEFT", 0, 0)
-            row:SetPoint("RIGHT", 0, 0)
 
-            -- Subtle alternating row highlight
             local bg = row:CreateTexture(nil, "BACKGROUND")
             bg:SetAllPoints()
             bg:SetColorTexture(1, 1, 1, (i % 2 == 0) and 0.03 or 0.0)
@@ -303,9 +442,7 @@ local function UpdateLootList()
                     GameTooltip:Show()
                 end
             end)
-            row:SetScript("OnLeave", function()
-                GameTooltip:Hide()
-            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
             lootRows[i] = row
         end
@@ -318,22 +455,23 @@ local function UpdateLootList()
         row:SetPoint("TOPRIGHT", lootFrame.scrollChild, "TOPRIGHT", 0, -((i - 1) * rowHeight))
 
         row.icon:SetTexture(e.icon or 134400)
+        row.nameText:SetFont(fontPath, 11, "")
+        row.valText:SetFont(fontPath, 11, "")
+
         local displayLabel = e.link or e.name or ("Item #" .. tostring(e.itemID))
         if (e.count or 1) > 1 then
-            displayLabel = displayLabel .. " |cffaaaaaa x" .. e.count .. "|r"
+            displayLabel = displayLabel .. " |cffaaaaaax" .. e.count .. "|r"
         end
         row.nameText:SetText(displayLabel)
         row.valText:SetText(FormatMoneyUI(itemData.totalVal))
         row:Show()
     end
 
-    -- Hide unused rows
     for i = #sorted + 1, #lootRows do
         lootRows[i]:Hide()
     end
 
-    local contentHeight = math.max(#sorted * rowHeight, 1)
-    lootFrame.scrollChild:SetHeight(contentHeight)
+    lootFrame.scrollChild:SetHeight(math.max(#sorted * rowHeight, 1))
 end
 
 local function UpdateLootPanelVisibility()
@@ -356,12 +494,12 @@ local function ApplyLayoutMode()
     local dungeonMode = IsDungeonMode()
     uiFrame.dungeonCheck:SetChecked(dungeonMode)
 
-    if dungeonMode then
-        uiFrame:SetHeight(308)
+    local rowStep = 16
+    local y = 0
 
+    if dungeonMode then
         uiFrame.sessionLabel:ClearAllPoints()
         uiFrame.sessionLabel:SetPoint("TOP", -62, -32)
-
         uiFrame.sessionTimerText:ClearAllPoints()
         uiFrame.sessionTimerText:SetPoint("TOP", -62, -46)
 
@@ -370,56 +508,10 @@ local function ApplyLayoutMode()
         uiFrame.runTimerText:Show()
         uiFrame.lapBtn:Show()
 
-        uiFrame.div2:ClearAllPoints()
-        uiFrame.div2:SetPoint("TOP", 0, -88)
-
-        uiFrame.totalRunsLbl:Show()
-        uiFrame.totalRunsVal:Show()
-        uiFrame.rphLbl:Show()
-        uiFrame.rphVal:Show()
-        uiFrame.lastRunLbl:Show()
-        uiFrame.lastRunVal:Show()
-        uiFrame.fastRunLbl:Show()
-        uiFrame.fastRunVal:Show()
-
-        uiFrame.rawLbl:ClearAllPoints()
-        uiFrame.rawLbl:SetPoint("TOPLEFT", 12, -160)
-        uiFrame.rawVal:ClearAllPoints()
-        uiFrame.rawVal:SetPoint("TOPRIGHT", -12, -160)
-
-        uiFrame.vendorLbl:ClearAllPoints()
-        uiFrame.vendorLbl:SetPoint("TOPLEFT", 12, -176)
-        uiFrame.vendorVal:ClearAllPoints()
-        uiFrame.vendorVal:SetPoint("TOPRIGHT", -12, -176)
-
-        uiFrame.ahLbl:ClearAllPoints()
-        uiFrame.ahLbl:SetPoint("TOPLEFT", 12, -192)
-        uiFrame.ahVal:ClearAllPoints()
-        uiFrame.ahVal:SetPoint("TOPRIGHT", -12, -192)
-
-        uiFrame.div3:ClearAllPoints()
-        uiFrame.div3:SetPoint("TOP", 0, -208)
-
-        uiFrame.valModeLbl:ClearAllPoints()
-        uiFrame.valModeLbl:SetPoint("TOPLEFT", 12, -216)
-        uiFrame.valModeBtn:ClearAllPoints()
-        uiFrame.valModeBtn:SetPoint("TOPRIGHT", -12, -213)
-
-        uiFrame.totalLbl:ClearAllPoints()
-        uiFrame.totalLbl:SetPoint("TOPLEFT", 12, -236)
-        uiFrame.totalVal:ClearAllPoints()
-        uiFrame.totalVal:SetPoint("TOPRIGHT", -12, -236)
-
-        uiFrame.gphLbl:ClearAllPoints()
-        uiFrame.gphLbl:SetPoint("TOPLEFT", 12, -253)
-        uiFrame.gphVal:ClearAllPoints()
-        uiFrame.gphVal:SetPoint("TOPRIGHT", -12, -253)
+        y = -88
     else
-        uiFrame:SetHeight(228)
-
         uiFrame.sessionLabel:ClearAllPoints()
         uiFrame.sessionLabel:SetPoint("TOP", 0, -32)
-
         uiFrame.sessionTimerText:ClearAllPoints()
         uiFrame.sessionTimerText:SetPoint("TOP", 0, -46)
 
@@ -428,54 +520,56 @@ local function ApplyLayoutMode()
         uiFrame.runTimerText:Hide()
         uiFrame.lapBtn:Hide()
 
-        uiFrame.div2:ClearAllPoints()
-        uiFrame.div2:SetPoint("TOP", 0, -72)
-
-        uiFrame.totalRunsLbl:Hide()
-        uiFrame.totalRunsVal:Hide()
-        uiFrame.rphLbl:Hide()
-        uiFrame.rphVal:Hide()
-        uiFrame.lastRunLbl:Hide()
-        uiFrame.lastRunVal:Hide()
-        uiFrame.fastRunLbl:Hide()
-        uiFrame.fastRunVal:Hide()
-
-        uiFrame.rawLbl:ClearAllPoints()
-        uiFrame.rawLbl:SetPoint("TOPLEFT", 12, -80)
-        uiFrame.rawVal:ClearAllPoints()
-        uiFrame.rawVal:SetPoint("TOPRIGHT", -12, -80)
-
-        uiFrame.vendorLbl:ClearAllPoints()
-        uiFrame.vendorLbl:SetPoint("TOPLEFT", 12, -96)
-        uiFrame.vendorVal:ClearAllPoints()
-        uiFrame.vendorVal:SetPoint("TOPRIGHT", -12, -96)
-
-        uiFrame.ahLbl:ClearAllPoints()
-        uiFrame.ahLbl:SetPoint("TOPLEFT", 12, -112)
-        uiFrame.ahVal:ClearAllPoints()
-        uiFrame.ahVal:SetPoint("TOPRIGHT", -12, -112)
-
-        uiFrame.div3:ClearAllPoints()
-        uiFrame.div3:SetPoint("TOP", 0, -128)
-
-        uiFrame.valModeLbl:ClearAllPoints()
-        uiFrame.valModeLbl:SetPoint("TOPLEFT", 12, -136)
-        uiFrame.valModeBtn:ClearAllPoints()
-        uiFrame.valModeBtn:SetPoint("TOPRIGHT", -12, -133)
-
-        uiFrame.totalLbl:ClearAllPoints()
-        uiFrame.totalLbl:SetPoint("TOPLEFT", 12, -156)
-        uiFrame.totalVal:ClearAllPoints()
-        uiFrame.totalVal:SetPoint("TOPRIGHT", -12, -156)
-
-        uiFrame.gphLbl:ClearAllPoints()
-        uiFrame.gphLbl:SetPoint("TOPLEFT", 12, -173)
-        uiFrame.gphVal:ClearAllPoints()
-        uiFrame.gphVal:SetPoint("TOPRIGHT", -12, -173)
+        y = -72
     end
 
+    uiFrame.div2:ClearAllPoints()
+    uiFrame.div2:SetPoint("TOP", 0, y)
+    y = y - 8
+
+    local function PlaceRow(row, visible)
+        if visible then
+            row.lbl:ClearAllPoints()
+            row.lbl:SetPoint("TOPLEFT", 12, y)
+            row.val:ClearAllPoints()
+            row.val:SetPoint("TOPRIGHT", -12, y)
+            row.lbl:Show()
+            row.val:Show()
+            y = y - rowStep
+        else
+            row.lbl:Hide()
+            row.val:Hide()
+        end
+    end
+
+    PlaceRow(uiFrame.rows.totalRuns, dungeonMode and ns.db.showTotalRuns ~= false)
+    PlaceRow(uiFrame.rows.rph,       dungeonMode and ns.db.showRunsPerHour ~= false)
+    PlaceRow(uiFrame.rows.lastRun,   dungeonMode)
+    PlaceRow(uiFrame.rows.fastRun,   dungeonMode and ns.db.showFastestRun ~= false)
+    PlaceRow(uiFrame.rows.lockout,   dungeonMode and ns.db.showLockoutWarning ~= false)
+
+    PlaceRow(uiFrame.rows.raw,    true)
+    PlaceRow(uiFrame.rows.vendor, true)
+    PlaceRow(uiFrame.rows.ah,     true)
+
+    y = y - 2
+    uiFrame.div3:ClearAllPoints()
+    uiFrame.div3:SetPoint("TOP", 0, y)
+    y = y - 8
+
+    uiFrame.valModeLbl:ClearAllPoints()
+    uiFrame.valModeLbl:SetPoint("TOPLEFT", 12, y - 2)
+    uiFrame.valModeBtn:ClearAllPoints()
+    uiFrame.valModeBtn:SetPoint("TOPRIGHT", -12, y + 1)
+    y = y - 22
+
+    PlaceRow(uiFrame.rows.total, ns.db.showTotalGold ~= false)
+    PlaceRow(uiFrame.rows.gph,   true)
+
+    local totalHeight = math.abs(y) + 40
+    uiFrame:SetHeight(totalHeight)
     if lootFrame then
-        lootFrame:SetHeight(uiFrame:GetHeight())
+        lootFrame:SetHeight(totalHeight)
     end
 end
 
@@ -498,14 +592,23 @@ local function UpdateDisplay()
     uiFrame.runTimerText:SetText(FormatTime(state.runTime))
     uiFrame.runLabel:SetText(string.format("|cff00ccffRun #%d|r", state.runCount))
 
-    uiFrame.totalRunsVal:SetText(tostring(state.completedRuns))
-    uiFrame.rphVal:SetText(string.format("%.1f/hr", rph))
-    uiFrame.lastRunVal:SetText(FormatTime(state.lastRunTime))
-    uiFrame.fastRunVal:SetText(state.fastestRunTime and ("|cff00ff00" .. FormatTime(state.fastestRunTime) .. "|r") or "--:--")
+    uiFrame.rows.totalRuns.val:SetText(tostring(state.completedRuns))
+    uiFrame.rows.rph.val:SetText(string.format("%.1f/hr", rph))
+    uiFrame.rows.lastRun.val:SetText(FormatTime(state.lastRunTime))
+    uiFrame.rows.fastRun.val:SetText(state.fastestRunTime and ("|cff00ff00" .. FormatTime(state.fastestRunTime) .. "|r") or "--:--")
 
-    uiFrame.rawVal:SetText(FormatMoneyUI(state.rawCopper))
-    uiFrame.vendorVal:SetText(FormatMoneyUI(state.vendorCopper))
-    uiFrame.ahVal:SetText(FormatMoneyUI(state.ahCopper))
+    local hourlyRuns = GetHourlyRunCount()
+    if hourlyRuns >= 5 then
+        uiFrame.rows.lockout.val:SetText("|cffff3333LOCKOUT! (" .. hourlyRuns .. "/5)|r")
+    elseif hourlyRuns == 4 then
+        uiFrame.rows.lockout.val:SetText("|cffffaa00Warning (" .. hourlyRuns .. "/5)|r")
+    else
+        uiFrame.rows.lockout.val:SetText("|cff00ff00Safe (" .. hourlyRuns .. "/5)|r")
+    end
+
+    uiFrame.rows.raw.val:SetText(FormatMoneyUI(state.rawCopper))
+    uiFrame.rows.vendor.val:SetText(FormatMoneyUI(state.vendorCopper))
+    uiFrame.rows.ah.val:SetText(FormatMoneyUI(state.ahCopper))
 
     if useVendor then
         uiFrame.valModeBtn:SetText("|cffffd700Vendor + Raw|r")
@@ -513,8 +616,8 @@ local function UpdateDisplay()
         uiFrame.valModeBtn:SetText("|cff00ccffAH + Raw|r")
     end
 
-    uiFrame.totalVal:SetText(FormatMoneyUI(totalCopper))
-    uiFrame.gphVal:SetText(FormatMoneyUI(gphCopper) .. "/hr")
+    uiFrame.rows.total.val:SetText(FormatMoneyUI(totalCopper))
+    uiFrame.rows.gph.val:SetText(FormatMoneyUI(gphCopper) .. "/hr")
 
     if state.isRunning then
         uiFrame.startBtn:SetText("|cffffaa00Pause|r")
@@ -526,8 +629,7 @@ end
 local function ProcessLootedItem(itemID, count, retryIfUncached)
     if not itemID or OPENABLE_CONTAINERS[itemID] then return end
 
-    -- Query directly by numeric itemID so |cnIQ1: link formatting never interferes
-    local itemName, cleanLink, _, _, _, _, _, _, _, itemTexture, sellPrice, _, _, bindType = SafeGetItemInfo(itemID)
+    local itemName, cleanLink, itemQuality, _, _, _, _, _, _, itemTexture, sellPrice, _, _, bindType = SafeGetItemInfo(itemID)
 
     if not itemName and retryIfUncached then
         DebugPrint("Item uncached, queuing ID: " .. tostring(itemID))
@@ -542,18 +644,18 @@ local function ProcessLootedItem(itemID, count, retryIfUncached)
     local itemVendorTotal = sellPrice * count
     local itemAHTotal     = unitAH * count
 
-    DebugPrint(string.format("Looted %s (ID:%d) x%d | BoP=%s | Vendor=%dc | AH=%dc", tostring(itemName), itemID, count, tostring(isBoP), itemVendorTotal, itemAHTotal))
+    DebugPrint(string.format("Looted %s (ID:%d) x%d | Q=%s | BoP=%s | Vendor=%dc | AH=%dc", tostring(itemName), itemID, count, tostring(itemQuality), tostring(isBoP), itemVendorTotal, itemAHTotal))
 
     state.vendorCopper = state.vendorCopper + itemVendorTotal
     state.ahCopper     = state.ahCopper + itemAHTotal
 
-    -- Record into persistent lootLog for the side Loot Panel
     local key = tostring(itemID)
     local entry = state.lootLog[key]
     if entry then
         entry.count      = (entry.count or 0) + count
         entry.vendorUnit = sellPrice
         entry.ahUnit     = unitAH
+        entry.quality    = itemQuality or entry.quality or 1
         if cleanLink then entry.link = cleanLink end
         if itemTexture then entry.icon = itemTexture end
     else
@@ -562,6 +664,7 @@ local function ProcessLootedItem(itemID, count, retryIfUncached)
             name       = itemName or ("Item #" .. key),
             link       = cleanLink,
             icon       = itemTexture,
+            quality    = itemQuality or 1,
             count      = count,
             vendorUnit = sellPrice,
             ahUnit     = unitAH,
@@ -573,7 +676,6 @@ local function ProcessLootedItem(itemID, count, retryIfUncached)
     UpdateLootList()
 end
 
--- Send formatted summary to the chosen channel (no single '|' characters allowed in SendChatMessage)
 local function SendSummaryToChannel(chatType)
     if chatType == "PARTY" and not IsInGroup() then
         ns:Print(ns.Colors.red .. "You are not currently in a party." .. ns.Colors.reset)
@@ -616,24 +718,13 @@ local function SendSummaryToChannel(chatType)
     SendChatMessage(msg, chatType)
 end
 
--- Build or toggle the Post Channel Selector popup
 local function TogglePostMenu(anchorBtn)
     if not postMenu then
         local m = CreateFrame("Frame", "CrutchieFarmPostMenu", UIParent, "BackdropTemplate")
         m:SetSize(130, 122)
         m:SetFrameStrata("DIALOG")
         m:SetClampedToScreen(true)
-
-        if m.SetBackdrop then
-            m:SetBackdrop({
-                bgFile   = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                tile     = false,
-                edgeSize = 1,
-            })
-            m:SetBackdropColor(0.08, 0.08, 0.11, 0.96)
-            m:SetBackdropBorderColor(0.3, 0.3, 0.38, 1)
-        end
+        ApplyBackdropTheme(m, false)
 
         local header = m:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         header:SetPoint("TOP", 0, -7)
@@ -663,51 +754,64 @@ local function TogglePostMenu(anchorBtn)
     if postMenu:IsShown() then
         postMenu:Hide()
     else
+        ApplyBackdropTheme(postMenu, false)
         postMenu:ClearAllPoints()
         postMenu:SetPoint("TOP", anchorBtn, "BOTTOM", 0, -4)
         postMenu:Show()
     end
 end
 
--- Build the collapsible side Loot Window anchored to the main frame
 local function CreateLootPanel(parentFrame, toggleTabBtn)
     if lootFrame then return lootFrame end
 
     local lf = CreateFrame("Frame", "CrutchieTweaksLootFrame", parentFrame, "BackdropTemplate")
-    lf:SetWidth(238)
+    lf:SetWidth(244)
     lf:SetHeight(parentFrame:GetHeight())
     lf:SetPoint("TOPLEFT", toggleTabBtn, "TOPRIGHT", 1, 24)
     lf:SetFrameStrata("MEDIUM")
     lf:SetClampedToScreen(true)
 
-    if lf.SetBackdrop then
-        lf:SetBackdrop({
-            bgFile   = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            tile     = false,
-            edgeSize = 1,
-        })
-        lf:SetBackdropColor(0.06, 0.06, 0.08, 0.92)
-        lf:SetBackdropBorderColor(0.2, 0.2, 0.25, 1)
-    end
-
     local header = lf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     header:SetPoint("TOPLEFT", 10, -8)
-    header:SetText("|cff00ccffSession Loot|r |cffaaaaaa(0)|r")
+    header:SetText("|cff00ccffLoot|r |cffaaaaaa(0)|r")
     lf.header = header
+
+    local filterBtn = CreateFrame("Button", nil, lf, "UIPanelButtonTemplate")
+    filterBtn:SetSize(82, 18)
+    filterBtn:SetPoint("TOPRIGHT", -8, -5)
+    filterBtn:SetNormalFontObject("GameFontHighlightSmall")
+    filterBtn:SetText("All")
+    filterBtn:SetScript("OnClick", function()
+        local cur = ns.db.timerLootMinQual or 0
+        local nextQ = 0
+        for i, qf in ipairs(QUALITY_FILTERS) do
+            if qf.minQ == cur then
+                nextQ = QUALITY_FILTERS[(i % #QUALITY_FILTERS) + 1].minQ
+                break
+            end
+        end
+        ns.db.timerLootMinQual = nextQ
+        UpdateLootList()
+    end)
+    filterBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Click to filter Loot Window by minimum item quality", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    filterBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    lf.filterBtn = filterBtn
 
     local div = lf:CreateTexture(nil, "ARTWORK")
     div:SetColorTexture(0.25, 0.25, 0.3, 0.8)
-    div:SetSize(218, 1)
+    div:SetSize(224, 1)
     div:SetPoint("TOP", 0, -26)
 
-    -- Scrollable container for loot rows
     local scrollFrame = CreateFrame("ScrollFrame", "CrutchieFarmLootScroll", lf, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 8, -32)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 10)
 
     local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-    scrollChild:SetWidth(200)
+    scrollChild:SetWidth(206)
     scrollChild:SetHeight(1)
     scrollFrame:SetScrollChild(scrollChild)
 
@@ -716,7 +820,7 @@ local function CreateLootPanel(parentFrame, toggleTabBtn)
 
     local emptyText = lf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     emptyText:SetPoint("CENTER", 0, -6)
-    emptyText:SetText("No items looted yet.")
+    emptyText:SetText("No matching items looted.")
     lf.emptyText = emptyText
 
     lf:Hide()
@@ -728,7 +832,7 @@ local function CreateTimerUI()
     if uiFrame then return uiFrame end
 
     local f = CreateFrame("Frame", "CrutchieTweaksTimerFrame", UIParent, "BackdropTemplate")
-    f:SetSize(268, 308)
+    f:SetSize(BASE_WIDTH, 320)
     f:SetFrameStrata("MEDIUM")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -736,32 +840,35 @@ local function CreateTimerUI()
     f:SetClampedToScreen(true)
 
     local pos = ns.db.timerPos or { point = "CENTER", x = 0, y = 120 }
-    f:SetPoint(pos.point, UIParent, pos.point, pos.x, pos.y)
-
-    if f.SetBackdrop then
-        f:SetBackdrop({
-            bgFile   = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            tile     = false,
-            edgeSize = 1,
-        })
-        f:SetBackdropColor(0.06, 0.06, 0.08, 0.92)
-        f:SetBackdropBorderColor(0.2, 0.2, 0.25, 1)
+    if pos.point == "TOPLEFT" then
+        f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos.x, pos.y)
+    else
+        f:SetPoint(pos.point, UIParent, pos.point, pos.x, pos.y)
     end
 
-    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStart", function(self)
+        if not ns.db.timerLocked then
+            self:StartMoving()
+        end
+    end)
     f:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        local point, _, _, x, y = self:GetPoint()
-        ns.db.timerPos = { point = point, x = x, y = y }
+        local left = self:GetLeft()
+        local top  = self:GetTop()
+        if left and top then
+            ns.db.timerPos = { point = "TOPLEFT", x = left, y = top }
+        else
+            local point, _, _, x, y = self:GetPoint()
+            ns.db.timerPos = { point = point, x = x, y = y }
+        end
     end)
 
     -- Header Bar
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", 10, -8)
     title:SetText("|cff00ccffCrutchie's|r Farm Tracker")
+    f.title = title
 
-    -- Close Button ('X')
     local closeBtn = CreateFrame("Button", nil, f)
     closeBtn:SetSize(18, 18)
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
@@ -773,10 +880,46 @@ local function CreateTimerUI()
         f:Hide()
     end)
 
+    -- Options Gear Icon Button
+    local optBtn = CreateFrame("Button", nil, f)
+    optBtn:SetSize(16, 16)
+    optBtn:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
+    optBtn:SetNormalTexture("Interface\\Buttons\\UI-OptionsButton")
+    optBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    optBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Open Settings", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    optBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    optBtn:SetScript("OnClick", function()
+        local optMod = ns.Modules["Options"]
+        if optMod and optMod.ToggleUI then optMod:ToggleUI() end
+    end)
+
+    -- Lock / Unlock Position & Size Button
+    local lockBtn = CreateFrame("Button", nil, f)
+    lockBtn:SetSize(18, 18)
+    lockBtn:SetPoint("RIGHT", optBtn, "LEFT", -2, 0)
+    lockBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    lockBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(ns.db.timerLocked and "Unlock Window (Position & Size)" or "Lock Window (Position & Size)", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    lockBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    lockBtn:SetScript("OnClick", function()
+        ns.db.timerLocked = not ns.db.timerLocked
+        ApplyLockState()
+        local optMod = ns.Modules["Options"]
+        if optMod and optMod.SyncLockState then optMod:SyncLockState() end
+    end)
+    f.lockBtn = lockBtn
+
     -- Dungeon Mode Checkbox in Header
     local dungeonCheck = CreateFrame("CheckButton", "CrutchieFarmDungeonCheck", f, "UICheckButtonTemplate")
-    dungeonCheck:SetSize(20, 20)
-    dungeonCheck:SetPoint("RIGHT", closeBtn, "LEFT", -46, 0)
+    dungeonCheck:SetSize(18, 18)
+    dungeonCheck:SetPoint("RIGHT", lockBtn, "LEFT", -36, 0)
     dungeonCheck:SetScript("OnClick", function(self)
         ns.db.timerDungeonMode = self:GetChecked() and true or false
         ApplyLayoutMode()
@@ -785,7 +928,7 @@ local function CreateTimerUI()
 
     local dungeonCheckLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     dungeonCheckLbl:SetPoint("LEFT", dungeonCheck, "RIGHT", -1, 0)
-    dungeonCheckLbl:SetText("|cffccccccDungeon|r")
+    dungeonCheckLbl:SetText("|cffccccccDung|r")
     f.dungeonCheck = dungeonCheck
 
     -- Collapsible Side Arrow Tab for Loot Window
@@ -794,54 +937,31 @@ local function CreateTimerUI()
     lootToggleBtn:SetPoint("TOPLEFT", f, "TOPRIGHT", -1, -24)
     lootToggleBtn:SetNormalFontObject("GameFontNormal")
     lootToggleBtn:SetText(">")
-
-    if lootToggleBtn.SetBackdrop then
-        lootToggleBtn:SetBackdrop({
-            bgFile   = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            tile     = false,
-            edgeSize = 1,
-        })
-        lootToggleBtn:SetBackdropColor(0.08, 0.08, 0.11, 0.94)
-        lootToggleBtn:SetBackdropBorderColor(0.25, 0.25, 0.32, 1)
-    end
-
     lootToggleBtn:SetScript("OnEnter", function(self)
-        if self.SetBackdropColor then
-            self:SetBackdropColor(0.14, 0.16, 0.22, 0.98)
-        end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(IsLootPanelOpen() and "Hide Loot Window" or "Show Loot Window", 1, 1, 1)
         GameTooltip:Show()
     end)
-    lootToggleBtn:SetScript("OnLeave", function(self)
-        if self.SetBackdropColor then
-            self:SetBackdropColor(0.08, 0.08, 0.11, 0.94)
-        end
-        GameTooltip:Hide()
-    end)
+    lootToggleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     lootToggleBtn:SetScript("OnClick", function()
         ns.db.timerLootOpen = not IsLootPanelOpen()
         UpdateLootPanelVisibility()
     end)
     f.lootToggleBtn = lootToggleBtn
 
-    -- Create the attached Loot Panel
     CreateLootPanel(f, lootToggleBtn)
 
     local div1 = f:CreateTexture(nil, "ARTWORK")
     div1:SetColorTexture(0.25, 0.25, 0.3, 0.8)
-    div1:SetSize(248, 1)
+    div1:SetSize(256, 1)
     div1:SetPoint("TOP", 0, -26)
 
     -- Dual Timer Columns
     local sessionLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    sessionLabel:SetPoint("TOP", -62, -32)
     sessionLabel:SetText("|cffaaaaaaSession Total|r")
     f.sessionLabel = sessionLabel
 
     local sessionTimerText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    sessionTimerText:SetPoint("TOP", -62, -46)
     sessionTimerText:SetText("00:00")
     f.sessionTimerText = sessionTimerText
 
@@ -874,52 +994,44 @@ local function CreateTimerUI()
 
     local div2 = f:CreateTexture(nil, "ARTWORK")
     div2:SetColorTexture(0.25, 0.25, 0.3, 0.8)
-    div2:SetSize(248, 1)
-    div2:SetPoint("TOP", 0, -88)
+    div2:SetSize(256, 1)
     f.div2 = div2
 
-    local function CreateStatRow(label, yOffset)
+    f.rows = {}
+    f.allStatRows = {}
+    local function CreateStatRow(key, label, defaultVal)
         local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        lbl:SetPoint("TOPLEFT", 12, yOffset)
         lbl:SetText(label)
-
         local val = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        val:SetPoint("TOPRIGHT", -12, yOffset)
-        val:SetText("0c")
-        return lbl, val
+        val:SetText(defaultVal or "0c")
+        local row = { lbl = lbl, val = val }
+        f.rows[key] = row
+        table.insert(f.allStatRows, row)
+        return row
     end
 
-    f.totalRunsLbl, f.totalRunsVal = CreateStatRow("|cffaaaaaaTotal Runs:|r", -95)
-    f.totalRunsVal:SetText("0")
-
-    f.rphLbl, f.rphVal             = CreateStatRow("|cffaaaaaaRuns / Hour:|r", -111)
-    f.rphVal:SetText("0.0/hr")
-
-    f.lastRunLbl, f.lastRunVal     = CreateStatRow("|cffaaaaaaLast Run Clear:|r", -127)
-    f.lastRunVal:SetText("--:--")
-
-    f.fastRunLbl, f.fastRunVal     = CreateStatRow("|cffaaaaaaFastest Run:|r", -143)
-    f.fastRunVal:SetText("--:--")
-
-    f.rawLbl, f.rawVal             = CreateStatRow("|cffaaaaaaRaw Looted Coin:|r", -160)
-    f.vendorLbl, f.vendorVal       = CreateStatRow("|cffaaaaaaItems (Vendor):|r", -176)
-    f.ahLbl, f.ahVal               = CreateStatRow("|cffaaaaaaItems (AH / Est):|r", -192)
+    CreateStatRow("totalRuns", "|cffaaaaaaTotal Runs:|r", "0")
+    CreateStatRow("rph",       "|cffaaaaaaRuns / Hour:|r", "0.0/hr")
+    CreateStatRow("lastRun",   "|cffaaaaaaLast Run Clear:|r", "--:--")
+    CreateStatRow("fastRun",   "|cffaaaaaaFastest Run:|r", "--:--")
+    CreateStatRow("lockout",   "|cffaaaaaaHourly Lockout:|r", "|cff00ff00Safe (0/5)|r")
+    CreateStatRow("raw",       "|cffaaaaaaRaw Looted Coin:|r", "0c")
+    CreateStatRow("vendor",    "|cffaaaaaaItems (Vendor):|r", "0c")
+    CreateStatRow("ah",        "|cffaaaaaaItems (AH / Est):|r", "0c")
+    CreateStatRow("total",     "|cffffd700Total Session Value:|r", "0c")
+    CreateStatRow("gph",       "|cff00ccffSession Gold / Hr:|r", "0c/hr")
 
     local div3 = f:CreateTexture(nil, "ARTWORK")
     div3:SetColorTexture(0.25, 0.25, 0.3, 0.8)
-    div3:SetSize(248, 1)
-    div3:SetPoint("TOP", 0, -208)
+    div3:SetSize(256, 1)
     f.div3 = div3
 
-    -- Valuation Mode Toggle Row (AH + Raw vs. Vendor + Raw)
     local valModeLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    valModeLbl:SetPoint("TOPLEFT", 12, -216)
     valModeLbl:SetText("|cffaaaaaaGPH Source:|r")
     f.valModeLbl = valModeLbl
 
     local valModeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     valModeBtn:SetSize(98, 18)
-    valModeBtn:SetPoint("TOPRIGHT", -12, -213)
     valModeBtn:SetNormalFontObject("GameFontHighlightSmall")
     valModeBtn:SetText("|cff00ccffAH + Raw|r")
     valModeBtn:SetScript("OnClick", function()
@@ -927,18 +1039,7 @@ local function CreateTimerUI()
         UpdateDisplay()
         UpdateLootList()
     end)
-    valModeBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Click to toggle Total & Gold/Hr between:\n- AH + Raw Coin\n- Vendor + Raw Coin", 1, 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    valModeBtn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
     f.valModeBtn = valModeBtn
-
-    f.totalLbl, f.totalVal = CreateStatRow("|cffffd700Total Session Value:|r", -236)
-    f.gphLbl, f.gphVal     = CreateStatRow("|cff00ccffSession Gold / Hr:|r", -253)
 
     local function CreateActionButton(text, width, xOffset, onClick)
         local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -949,17 +1050,13 @@ local function CreateTimerUI()
         return btn
     end
 
-    -- Start / Pause Button
-    f.startBtn = CreateActionButton("|cff00ff00Start|r", 78, 10, function()
+    f.startBtn = CreateActionButton("|cff00ff00Start|r", 80, 10, function()
         state.isRunning = not state.isRunning
-        if state.isRunning then
-            state.lastSaveTime = GetTime()
-        end
+        if state.isRunning then state.lastSaveTime = GetTime() end
         UpdateDisplay()
     end)
 
-    -- Reset All Button
-    f.resetBtn = CreateActionButton("Reset", 78, 95, function()
+    f.resetBtn = CreateActionButton("Reset", 80, 98, function()
         state.isRunning      = false
         state.sessionTime    = 0
         state.runTime        = 0
@@ -978,12 +1075,55 @@ local function CreateTimerUI()
         UpdateLootList()
     end)
 
-    -- Post to Chat Button (opens channel chooser)
-    f.postBtn = CreateActionButton("|cff00ccffPost|r", 78, 180, function(self)
+    f.postBtn = CreateActionButton("|cff00ccffPost|r", 80, 186, function(self)
         TogglePostMenu(self)
     end)
 
-    -- Live Tick (updates every 0.2s while running)
+    -- Bottom-Right Drag-to-Resize Handle (auto-adjusts font size & syncs Options slider)
+    local resizeBtn = CreateFrame("Button", nil, f)
+    resizeBtn:SetSize(14, 14)
+    resizeBtn:SetPoint("BOTTOMRIGHT", -2, 2)
+    resizeBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    resizeBtn:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    resizeBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    f.resizeBtn = resizeBtn
+
+    resizeBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Drag to resize window & font", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    resizeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    resizeBtn:SetScript("OnMouseDown", function(self, btn)
+        if btn ~= "LeftButton" or ns.db.timerLocked then return end
+        local startScale = f:GetScale() or 1
+        local screenLeft = (f:GetLeft() or 0) * startScale
+        local uiScale    = UIParent:GetEffectiveScale()
+
+        self:SetScript("OnUpdate", function()
+            local cx = GetCursorPosition() / uiScale
+            local desiredWidth = cx - screenLeft
+            local newScale = desiredWidth / BASE_WIDTH
+            local newPx = math.floor((newScale * BASE_FONT_SIZE) + 0.5)
+
+            if newPx < 8 then newPx = 8 elseif newPx > 64 then newPx = 64 end
+
+            if newPx ~= ns.db.timerFontSize then
+                ns.db.timerFontSize = newPx
+                ApplyFontSize()
+                local optMod = ns.Modules["Options"]
+                if optMod and optMod.SyncFontSize then
+                    optMod:SyncFontSize(newPx)
+                end
+            end
+        end)
+    end)
+
+    resizeBtn:SetScript("OnMouseUp", function(self)
+        self:SetScript("OnUpdate", nil)
+    end)
+
     local accum = 0
     f:SetScript("OnUpdate", function(_, dt)
         if not state.isRunning then return end
@@ -999,7 +1139,12 @@ local function CreateTimerUI()
         end
     end)
 
+    uiFrame = f
+    ApplyTheme()
     ApplyLayoutMode()
+    ApplyFontSize()
+    ApplyLockState()
+
     if state.isShown then
         f:Show()
         UpdateDisplay()
@@ -1007,9 +1152,18 @@ local function CreateTimerUI()
         f:Hide()
     end
 
-    uiFrame = f
     UpdateLootPanelVisibility()
     return f
+end
+
+function mod:RefreshSettings()
+    if not uiFrame then return end
+    ApplyTheme()
+    ApplyLayoutMode()
+    ApplyFontSize()
+    ApplyLockState()
+    UpdateDisplay()
+    UpdateLootList()
 end
 
 function mod:ToggleUI()
@@ -1022,6 +1176,8 @@ function mod:ToggleUI()
     else
         state.isShown = true
         ApplyLayoutMode()
+        ApplyFontSize()
+        ApplyLockState()
         f:Show()
         UpdateDisplay()
         UpdateLootPanelVisibility()
@@ -1031,6 +1187,27 @@ end
 function mod:ToggleDebug()
     debugMode = not debugMode
     ns:Print("FarmTimer debug mode: " .. (debugMode and "|cff00ff00ON|r" or "|cffff3333OFF|r"))
+end
+
+local function CheckAutoStartDungeon()
+    local inInstance, instanceType = IsInInstance()
+    local isDungeon = inInstance and (instanceType == "party")
+
+    if isDungeon and not wasInDungeon then
+        if IsDungeonMode() and ns.db.timerAutoStart and not state.isRunning then
+            state.isRunning    = true
+            state.lastSaveTime = GetTime()
+            if uiFrame and not uiFrame:IsShown() then
+                state.isShown = true
+                uiFrame:Show()
+                UpdateLootPanelVisibility()
+            end
+            UpdateDisplay()
+            ns:Print("Entered dungeon — Farm Tracker |cff00ff00auto-started|r.")
+        end
+    end
+
+    wasInDungeon = isDungeon
 end
 
 function mod:OnInit()
@@ -1044,11 +1221,16 @@ function mod:OnInit()
     tracker:RegisterEvent("CHAT_MSG_LOOT")
     tracker:RegisterEvent("CHAT_MSG_SYSTEM")
     tracker:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    tracker:RegisterEvent("PLAYER_ENTERING_WORLD")
+    tracker:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     tracker:RegisterEvent("PLAYER_LOGOUT")
 
     tracker:SetScript("OnEvent", function(_, event, arg1, arg2)
         if event == "PLAYER_LOGOUT" then
             state.lastSaveTime = GetTime()
+
+        elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
+            CheckAutoStartDungeon()
 
         elseif event == "CHAT_MSG_SYSTEM" and arg1 then
             if IsDungeonMode() and string.find(arg1, "has been reset.", 1, true) then
@@ -1086,14 +1268,9 @@ function mod:OnInit()
 
             if not isSelfLoot then return end
 
-            -- Extract numeric itemID directly from "|Hitem:2674:..." regardless of |cnIQ1: or |cffffffff wrapper
             local itemID = tonumber(string.match(lootMsg, "|Hitem:(%d+)"))
-            if not itemID then
-                DebugPrint("Failed to extract itemID from: " .. gsub(tostring(lootMsg), "|", "||"))
-                return
-            end
+            if not itemID then return end
 
-            -- Match stack count across "|h|rx5", "|hx5", or "|h x5"
             local count = tonumber(string.match(lootMsg, "|h|r%s*x(%d+)") or string.match(lootMsg, "|h%s*x(%d+)")) or 1
             ProcessLootedItem(itemID, count, true)
         end

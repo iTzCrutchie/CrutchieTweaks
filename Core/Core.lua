@@ -42,6 +42,15 @@ SLASH_CRUTCHIETWEAKS2 = "/crutchietweaks"
 SlashCmdList["CRUTCHIETWEAKS"] = function(msg)
     local cmd = string.lower(strtrim(msg or ""))
 
+    -- Open In-Game Settings Menu
+    if cmd == "config" or cmd == "options" or cmd == "menu" then
+        local optMod = ns.Modules["Options"]
+        if optMod and optMod.ToggleUI then
+            optMod:ToggleUI()
+        end
+        return
+    end
+
     -- Toggle Farm Timer UI
     if cmd == "timer" or cmd == "t" then
         local timerMod = ns.Modules["FarmTimer"]

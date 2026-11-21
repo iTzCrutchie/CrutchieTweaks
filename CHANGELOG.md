@@ -7,7 +7,21 @@
 
 ## [0.0.2] - 2026-11-20
 ### Added
-* Collapsable loot window and a toggle to switch the Total Session and Gold per hour between vendor selling or AH selling
+* Collapsible loot window attached to the Farm Tracker with a quality filter (All, Common+, Uncommon+, Rare+, Epic+, Legendary+).
+* Toggle to switch Session Total and Gold/Hr between AH + Raw Coin and Vendor + Raw Coin.
+* In-game settings menu (`/ct config` or gear icon) with theme options (Dark Modern / WoW Forever), font dropdown, 8–64px font size slider, and toggles for individual stats.
+* Drag-to-resize corner handle and a lock button to lock window position and size.
+* Minimap button (Left-Click toggles the tracker, Right-Click opens settings).
+* Hourly instance lockout warning (5/hr) and auto-start on dungeon entry for Dungeon Mode.
+* Peer-to-peer version checker to notify in chat when a newer version is out.
+
+### Changed
+* Switched Session Gold/Min to Session Gold/Hr.
+* Set `hideRaidManager` to off by default for new installs.
+
+### Fixed
+* Stopped openable clams from double-counting both the clam and its looted contents.
+* Fixed item link parsing on 1.60.1 (`|cnIQ` color codes) so vendor and AH values track properly.
 
 ## [0.0.1] - 2026-11-20
 
