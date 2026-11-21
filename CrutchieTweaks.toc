@@ -2,7 +2,7 @@
 ## Title: |cff00ccffCrutchie|rTweaks
 ## Notes: Personal UI tweaks and quality-of-life improvements for WoW: Forever.
 ## Author: Crutchie
-## Version: @project-versioon@
+## Version: @project-version@
 ## Category: Tweaks
 ## IconTexture: Interface\AddOns\CrutchieTweaks\Media\CrutchieTweaks
 ## SavedVariables: CrutchieTweaksDB
