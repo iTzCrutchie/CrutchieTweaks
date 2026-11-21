@@ -16,6 +16,7 @@ local state = {
     vendorCopper   = 0,
     ahCopper       = 0,
     lastSaveTime   = nil,
+    lootLog        = {},
 }
 
 -- Openable clams / containers whose contents fire a second CHAT_MSG_LOOT when auto-opened
@@ -32,6 +33,8 @@ local OPENABLE_CONTAINERS = {
 
 local debugMode    = false
 local uiFrame      = nil
+local lootFrame    = nil
+local lootRows     = {}
 local postMenu     = nil
 local pendingItems = {}
 
@@ -58,8 +61,16 @@ local function InitSavedState()
 
     for k, defaultVal in pairs(state) do
         if saved[k] == nil then
-            saved[k] = defaultVal
+            if type(defaultVal) == "table" then
+                saved[k] = {}
+            else
+                saved[k] = defaultVal
+            end
         end
+    end
+
+    if type(saved.lootLog) ~= "table" then
+        saved.lootLog = {}
     end
 
     state = saved
@@ -188,6 +199,15 @@ local function IsDungeonMode()
     return ns.db.timerDungeonMode
 end
 
+-- Valuation mode: false = AH + Raw Coin (default), true = Vendor + Raw Coin
+local function IsVendorOnlyMode()
+    return ns.db.timerVendorOnly == true
+end
+
+local function IsLootPanelOpen()
+    return ns.db.timerLootOpen == true
+end
+
 local function StartNextRun()
     if not IsDungeonMode() then return end
     if state.runTime > 3 then
@@ -201,6 +221,135 @@ local function StartNextRun()
     state.runTime = 0
 end
 
+-- Populate and sort the collapsible loot window
+local function UpdateLootList()
+    if not lootFrame or not lootFrame:IsShown() then return end
+
+    local useVendor = IsVendorOnlyMode()
+    local sorted = {}
+    local totalItemCount = 0
+
+    for _, entry in pairs(state.lootLog) do
+        local unitVal = useVendor and (entry.vendorUnit or 0) or (entry.ahUnit or 0)
+        local rowVal  = unitVal * (entry.count or 1)
+        totalItemCount = totalItemCount + (entry.count or 1)
+        table.insert(sorted, {
+            entry    = entry,
+            totalVal = rowVal,
+        })
+    end
+
+    -- Sort highest value items to the top
+    table.sort(sorted, function(a, b)
+        if a.totalVal ~= b.totalVal then
+            return a.totalVal > b.totalVal
+        end
+        return (a.entry.name or "") < (b.entry.name or "")
+    end)
+
+    lootFrame.header:SetText(string.format("|cff00ccffSession Loot|r |cffaaaaaa(%d)|r", totalItemCount))
+
+    if #sorted == 0 then
+        lootFrame.emptyText:Show()
+    else
+        lootFrame.emptyText:Hide()
+    end
+
+    local rowHeight = 20
+    for i, itemData in ipairs(sorted) do
+        local row = lootRows[i]
+        if not row then
+            row = CreateFrame("Button", nil, lootFrame.scrollChild)
+            row:SetHeight(rowHeight)
+            row:SetPoint("LEFT", 0, 0)
+            row:SetPoint("RIGHT", 0, 0)
+
+            -- Subtle alternating row highlight
+            local bg = row:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(1, 1, 1, (i % 2 == 0) and 0.03 or 0.0)
+            row.bg = bg
+
+            local hl = row:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(0.2, 0.5, 0.8, 0.2)
+
+            local icon = row:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(16, 16)
+            icon:SetPoint("LEFT", 2, 0)
+            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            row.icon = icon
+
+            local valText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            valText:SetPoint("RIGHT", -4, 0)
+            valText:SetJustifyH("RIGHT")
+            row.valText = valText
+
+            local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            nameText:SetPoint("LEFT", icon, "RIGHT", 5, 0)
+            nameText:SetPoint("RIGHT", valText, "LEFT", -6, 0)
+            nameText:SetJustifyH("LEFT")
+            nameText:SetWordWrap(false)
+            row.nameText = nameText
+
+            row:SetScript("OnEnter", function(self)
+                if self.itemID then
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    if self.itemLink then
+                        GameTooltip:SetHyperlink(self.itemLink)
+                    else
+                        GameTooltip:SetHyperlink("item:" .. self.itemID)
+                    end
+                    GameTooltip:Show()
+                end
+            end)
+            row:SetScript("OnLeave", function()
+                GameTooltip:Hide()
+            end)
+
+            lootRows[i] = row
+        end
+
+        local e = itemData.entry
+        row.itemID   = e.itemID
+        row.itemLink = e.link
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", lootFrame.scrollChild, "TOPLEFT", 0, -((i - 1) * rowHeight))
+        row:SetPoint("TOPRIGHT", lootFrame.scrollChild, "TOPRIGHT", 0, -((i - 1) * rowHeight))
+
+        row.icon:SetTexture(e.icon or 134400)
+        local displayLabel = e.link or e.name or ("Item #" .. tostring(e.itemID))
+        if (e.count or 1) > 1 then
+            displayLabel = displayLabel .. " |cffaaaaaa x" .. e.count .. "|r"
+        end
+        row.nameText:SetText(displayLabel)
+        row.valText:SetText(FormatMoneyUI(itemData.totalVal))
+        row:Show()
+    end
+
+    -- Hide unused rows
+    for i = #sorted + 1, #lootRows do
+        lootRows[i]:Hide()
+    end
+
+    local contentHeight = math.max(#sorted * rowHeight, 1)
+    lootFrame.scrollChild:SetHeight(contentHeight)
+end
+
+local function UpdateLootPanelVisibility()
+    if not uiFrame or not lootFrame then return end
+
+    if IsLootPanelOpen() and uiFrame:IsShown() then
+        lootFrame:SetHeight(uiFrame:GetHeight())
+        lootFrame:Show()
+        uiFrame.lootToggleBtn:SetText("<")
+        UpdateLootList()
+    else
+        lootFrame:Hide()
+        uiFrame.lootToggleBtn:SetText(">")
+    end
+end
+
 local function ApplyLayoutMode()
     if not uiFrame then return end
 
@@ -208,7 +357,7 @@ local function ApplyLayoutMode()
     uiFrame.dungeonCheck:SetChecked(dungeonMode)
 
     if dungeonMode then
-        uiFrame:SetHeight(288)
+        uiFrame:SetHeight(308)
 
         uiFrame.sessionLabel:ClearAllPoints()
         uiFrame.sessionLabel:SetPoint("TOP", -62, -32)
@@ -251,17 +400,22 @@ local function ApplyLayoutMode()
         uiFrame.div3:ClearAllPoints()
         uiFrame.div3:SetPoint("TOP", 0, -208)
 
+        uiFrame.valModeLbl:ClearAllPoints()
+        uiFrame.valModeLbl:SetPoint("TOPLEFT", 12, -216)
+        uiFrame.valModeBtn:ClearAllPoints()
+        uiFrame.valModeBtn:SetPoint("TOPRIGHT", -12, -213)
+
         uiFrame.totalLbl:ClearAllPoints()
-        uiFrame.totalLbl:SetPoint("TOPLEFT", 12, -215)
+        uiFrame.totalLbl:SetPoint("TOPLEFT", 12, -236)
         uiFrame.totalVal:ClearAllPoints()
-        uiFrame.totalVal:SetPoint("TOPRIGHT", -12, -215)
+        uiFrame.totalVal:SetPoint("TOPRIGHT", -12, -236)
 
         uiFrame.gphLbl:ClearAllPoints()
-        uiFrame.gphLbl:SetPoint("TOPLEFT", 12, -232)
+        uiFrame.gphLbl:SetPoint("TOPLEFT", 12, -253)
         uiFrame.gphVal:ClearAllPoints()
-        uiFrame.gphVal:SetPoint("TOPRIGHT", -12, -232)
+        uiFrame.gphVal:SetPoint("TOPRIGHT", -12, -253)
     else
-        uiFrame:SetHeight(208)
+        uiFrame:SetHeight(228)
 
         uiFrame.sessionLabel:ClearAllPoints()
         uiFrame.sessionLabel:SetPoint("TOP", 0, -32)
@@ -304,22 +458,33 @@ local function ApplyLayoutMode()
         uiFrame.div3:ClearAllPoints()
         uiFrame.div3:SetPoint("TOP", 0, -128)
 
+        uiFrame.valModeLbl:ClearAllPoints()
+        uiFrame.valModeLbl:SetPoint("TOPLEFT", 12, -136)
+        uiFrame.valModeBtn:ClearAllPoints()
+        uiFrame.valModeBtn:SetPoint("TOPRIGHT", -12, -133)
+
         uiFrame.totalLbl:ClearAllPoints()
-        uiFrame.totalLbl:SetPoint("TOPLEFT", 12, -135)
+        uiFrame.totalLbl:SetPoint("TOPLEFT", 12, -156)
         uiFrame.totalVal:ClearAllPoints()
-        uiFrame.totalVal:SetPoint("TOPRIGHT", -12, -135)
+        uiFrame.totalVal:SetPoint("TOPRIGHT", -12, -156)
 
         uiFrame.gphLbl:ClearAllPoints()
-        uiFrame.gphLbl:SetPoint("TOPLEFT", 12, -152)
+        uiFrame.gphLbl:SetPoint("TOPLEFT", 12, -173)
         uiFrame.gphVal:ClearAllPoints()
-        uiFrame.gphVal:SetPoint("TOPRIGHT", -12, -152)
+        uiFrame.gphVal:SetPoint("TOPRIGHT", -12, -173)
+    end
+
+    if lootFrame then
+        lootFrame:SetHeight(uiFrame:GetHeight())
     end
 end
 
 local function UpdateDisplay()
     if not uiFrame or not uiFrame:IsShown() then return end
 
-    local totalCopper = state.rawCopper + state.ahCopper
+    local useVendor   = IsVendorOnlyMode()
+    local itemTotal   = useVendor and state.vendorCopper or state.ahCopper
+    local totalCopper = state.rawCopper + itemTotal
     local gphCopper   = 0
     local rph         = 0
 
@@ -341,6 +506,13 @@ local function UpdateDisplay()
     uiFrame.rawVal:SetText(FormatMoneyUI(state.rawCopper))
     uiFrame.vendorVal:SetText(FormatMoneyUI(state.vendorCopper))
     uiFrame.ahVal:SetText(FormatMoneyUI(state.ahCopper))
+
+    if useVendor then
+        uiFrame.valModeBtn:SetText("|cffffd700Vendor + Raw|r")
+    else
+        uiFrame.valModeBtn:SetText("|cff00ccffAH + Raw|r")
+    end
+
     uiFrame.totalVal:SetText(FormatMoneyUI(totalCopper))
     uiFrame.gphVal:SetText(FormatMoneyUI(gphCopper) .. "/hr")
 
@@ -355,7 +527,7 @@ local function ProcessLootedItem(itemID, count, retryIfUncached)
     if not itemID or OPENABLE_CONTAINERS[itemID] then return end
 
     -- Query directly by numeric itemID so |cnIQ1: link formatting never interferes
-    local itemName, cleanLink, _, _, _, _, _, _, _, _, sellPrice, _, _, bindType = SafeGetItemInfo(itemID)
+    local itemName, cleanLink, _, _, _, _, _, _, _, itemTexture, sellPrice, _, _, bindType = SafeGetItemInfo(itemID)
 
     if not itemName and retryIfUncached then
         DebugPrint("Item uncached, queuing ID: " .. tostring(itemID))
@@ -374,7 +546,31 @@ local function ProcessLootedItem(itemID, count, retryIfUncached)
 
     state.vendorCopper = state.vendorCopper + itemVendorTotal
     state.ahCopper     = state.ahCopper + itemAHTotal
+
+    -- Record into persistent lootLog for the side Loot Panel
+    local key = tostring(itemID)
+    local entry = state.lootLog[key]
+    if entry then
+        entry.count      = (entry.count or 0) + count
+        entry.vendorUnit = sellPrice
+        entry.ahUnit     = unitAH
+        if cleanLink then entry.link = cleanLink end
+        if itemTexture then entry.icon = itemTexture end
+    else
+        state.lootLog[key] = {
+            itemID     = itemID,
+            name       = itemName or ("Item #" .. key),
+            link       = cleanLink,
+            icon       = itemTexture,
+            count      = count,
+            vendorUnit = sellPrice,
+            ahUnit     = unitAH,
+            isBoP      = isBoP,
+        }
+    end
+
     UpdateDisplay()
+    UpdateLootList()
 end
 
 -- Send formatted summary to the chosen channel (no single '|' characters allowed in SendChatMessage)
@@ -388,7 +584,10 @@ local function SendSummaryToChannel(chatType)
         return
     end
 
-    local totalCopper  = state.rawCopper + state.ahCopper
+    local useVendor    = IsVendorOnlyMode()
+    local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
+    local modeTag      = useVendor and "Vendor" or "AH"
+    local totalCopper  = state.rawCopper + itemTotal
     local sessionHours = (state.sessionTime >= 1) and (state.sessionTime / 3600) or 0
     local gphCopper    = (sessionHours > 0) and (totalCopper / sessionHours) or 0
     local rph          = (sessionHours > 0) and (state.completedRuns / sessionHours) or 0
@@ -402,10 +601,11 @@ local function SendSummaryToChannel(chatType)
     end
 
     local msg = string.format(
-        "[Crutchie's Farm Tracker] %s - Session: %s%s // Total: %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s",
+        "[Crutchie's Farm Tracker] %s - Session: %s%s // Total (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s",
         zoneName,
         FormatTime(state.sessionTime),
         runInfo,
+        modeTag,
         FormatMoneyPlain(totalCopper),
         FormatMoneyPlain(gphCopper),
         FormatMoneyPlain(state.rawCopper),
@@ -469,11 +669,66 @@ local function TogglePostMenu(anchorBtn)
     end
 end
 
+-- Build the collapsible side Loot Window anchored to the main frame
+local function CreateLootPanel(parentFrame, toggleTabBtn)
+    if lootFrame then return lootFrame end
+
+    local lf = CreateFrame("Frame", "CrutchieTweaksLootFrame", parentFrame, "BackdropTemplate")
+    lf:SetWidth(238)
+    lf:SetHeight(parentFrame:GetHeight())
+    lf:SetPoint("TOPLEFT", toggleTabBtn, "TOPRIGHT", 1, 24)
+    lf:SetFrameStrata("MEDIUM")
+    lf:SetClampedToScreen(true)
+
+    if lf.SetBackdrop then
+        lf:SetBackdrop({
+            bgFile   = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            tile     = false,
+            edgeSize = 1,
+        })
+        lf:SetBackdropColor(0.06, 0.06, 0.08, 0.92)
+        lf:SetBackdropBorderColor(0.2, 0.2, 0.25, 1)
+    end
+
+    local header = lf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    header:SetPoint("TOPLEFT", 10, -8)
+    header:SetText("|cff00ccffSession Loot|r |cffaaaaaa(0)|r")
+    lf.header = header
+
+    local div = lf:CreateTexture(nil, "ARTWORK")
+    div:SetColorTexture(0.25, 0.25, 0.3, 0.8)
+    div:SetSize(218, 1)
+    div:SetPoint("TOP", 0, -26)
+
+    -- Scrollable container for loot rows
+    local scrollFrame = CreateFrame("ScrollFrame", "CrutchieFarmLootScroll", lf, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 8, -32)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -28, 10)
+
+    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollChild:SetWidth(200)
+    scrollChild:SetHeight(1)
+    scrollFrame:SetScrollChild(scrollChild)
+
+    lf.scrollFrame = scrollFrame
+    lf.scrollChild = scrollChild
+
+    local emptyText = lf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    emptyText:SetPoint("CENTER", 0, -6)
+    emptyText:SetText("No items looted yet.")
+    lf.emptyText = emptyText
+
+    lf:Hide()
+    lootFrame = lf
+    return lf
+end
+
 local function CreateTimerUI()
     if uiFrame then return uiFrame end
 
     local f = CreateFrame("Frame", "CrutchieTweaksTimerFrame", UIParent, "BackdropTemplate")
-    f:SetSize(268, 288)
+    f:SetSize(268, 308)
     f:SetFrameStrata("MEDIUM")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -532,6 +787,47 @@ local function CreateTimerUI()
     dungeonCheckLbl:SetPoint("LEFT", dungeonCheck, "RIGHT", -1, 0)
     dungeonCheckLbl:SetText("|cffccccccDungeon|r")
     f.dungeonCheck = dungeonCheck
+
+    -- Collapsible Side Arrow Tab for Loot Window
+    local lootToggleBtn = CreateFrame("Button", "CrutchieFarmLootToggle", f, "BackdropTemplate")
+    lootToggleBtn:SetSize(18, 48)
+    lootToggleBtn:SetPoint("TOPLEFT", f, "TOPRIGHT", -1, -24)
+    lootToggleBtn:SetNormalFontObject("GameFontNormal")
+    lootToggleBtn:SetText(">")
+
+    if lootToggleBtn.SetBackdrop then
+        lootToggleBtn:SetBackdrop({
+            bgFile   = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            tile     = false,
+            edgeSize = 1,
+        })
+        lootToggleBtn:SetBackdropColor(0.08, 0.08, 0.11, 0.94)
+        lootToggleBtn:SetBackdropBorderColor(0.25, 0.25, 0.32, 1)
+    end
+
+    lootToggleBtn:SetScript("OnEnter", function(self)
+        if self.SetBackdropColor then
+            self:SetBackdropColor(0.14, 0.16, 0.22, 0.98)
+        end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(IsLootPanelOpen() and "Hide Loot Window" or "Show Loot Window", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    lootToggleBtn:SetScript("OnLeave", function(self)
+        if self.SetBackdropColor then
+            self:SetBackdropColor(0.08, 0.08, 0.11, 0.94)
+        end
+        GameTooltip:Hide()
+    end)
+    lootToggleBtn:SetScript("OnClick", function()
+        ns.db.timerLootOpen = not IsLootPanelOpen()
+        UpdateLootPanelVisibility()
+    end)
+    f.lootToggleBtn = lootToggleBtn
+
+    -- Create the attached Loot Panel
+    CreateLootPanel(f, lootToggleBtn)
 
     local div1 = f:CreateTexture(nil, "ARTWORK")
     div1:SetColorTexture(0.25, 0.25, 0.3, 0.8)
@@ -615,8 +911,34 @@ local function CreateTimerUI()
     div3:SetPoint("TOP", 0, -208)
     f.div3 = div3
 
-    f.totalLbl, f.totalVal = CreateStatRow("|cffffd700Total Session Value:|r", -215)
-    f.gphLbl, f.gphVal     = CreateStatRow("|cff00ccffSession Gold / Hr:|r", -232)
+    -- Valuation Mode Toggle Row (AH + Raw vs. Vendor + Raw)
+    local valModeLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    valModeLbl:SetPoint("TOPLEFT", 12, -216)
+    valModeLbl:SetText("|cffaaaaaaGPH Source:|r")
+    f.valModeLbl = valModeLbl
+
+    local valModeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    valModeBtn:SetSize(98, 18)
+    valModeBtn:SetPoint("TOPRIGHT", -12, -213)
+    valModeBtn:SetNormalFontObject("GameFontHighlightSmall")
+    valModeBtn:SetText("|cff00ccffAH + Raw|r")
+    valModeBtn:SetScript("OnClick", function()
+        ns.db.timerVendorOnly = not IsVendorOnlyMode()
+        UpdateDisplay()
+        UpdateLootList()
+    end)
+    valModeBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Click to toggle Total & Gold/Hr between:\n- AH + Raw Coin\n- Vendor + Raw Coin", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    valModeBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    f.valModeBtn = valModeBtn
+
+    f.totalLbl, f.totalVal = CreateStatRow("|cffffd700Total Session Value:|r", -236)
+    f.gphLbl, f.gphVal     = CreateStatRow("|cff00ccffSession Gold / Hr:|r", -253)
 
     local function CreateActionButton(text, width, xOffset, onClick)
         local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -649,9 +971,11 @@ local function CreateTimerUI()
         state.vendorCopper   = 0
         state.ahCopper       = 0
         state.lastSaveTime   = GetTime()
+        wipe(state.lootLog)
         wipe(pendingItems)
         if postMenu then postMenu:Hide() end
         UpdateDisplay()
+        UpdateLootList()
     end)
 
     -- Post to Chat Button (opens channel chooser)
@@ -684,6 +1008,7 @@ local function CreateTimerUI()
     end
 
     uiFrame = f
+    UpdateLootPanelVisibility()
     return f
 end
 
@@ -693,11 +1018,13 @@ function mod:ToggleUI()
         state.isShown = false
         if postMenu then postMenu:Hide() end
         f:Hide()
+        UpdateLootPanelVisibility()
     else
         state.isShown = true
         ApplyLayoutMode()
         f:Show()
         UpdateDisplay()
+        UpdateLootPanelVisibility()
     end
 end
 

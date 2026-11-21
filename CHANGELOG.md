@@ -5,6 +5,10 @@
 ```markdown
 # Changelog
 
+## [0.0.2] - 2026-11-20
+### Added
+* Collapsable loot window and a toggle to switch the Total Session and Gold per hour between vendor selling or AH selling
+
 ## [0.0.1] - 2026-11-20
 
 ### Added
