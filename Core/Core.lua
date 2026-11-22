@@ -60,10 +60,26 @@ SlashCmdList["FARMTRACKER"] = function(msg)
         return
     end
 
+    if cmd == "history" or cmd == "hist" or cmd == "log" then
+        local histMod = ns.Modules["History"]
+        if histMod  and histMod.ToggleUI then
+            histMod:ToggleUI()
+        end
+        return
+    end
+
     if cmd == "config" or cmd == "options" or cmd == "menu" then
         local optMod = ns.Modules["Options"]
         if optMod and optMod.ToggleUI then
             optMod:ToggleUI()
+        end
+        return
+    end
+
+    if cmd == "testalert" then
+        local timerMod = ns.Modules["FarmTimer"]
+        if timerMod and timerMod.TestDropAlert then
+            timerMod:TestDropAlert()
         end
         return
     end
@@ -78,6 +94,7 @@ SlashCmdList["FARMTRACKER"] = function(msg)
 
     ns:Print("Commands:")
     print("  |cffffff00/ft|r (or |cffffff00/ft timer|r) - Toggle Farm Tracker window.")
+    print("  |cffffff00/ft history|r - Open Session History log.")
     print("  |cffffff00/ft config|r - Open Settings menu.")
     print("  |cffffff00/ft debug|r - Toggle loot/coin debug output.")
 end

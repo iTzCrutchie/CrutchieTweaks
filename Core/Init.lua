@@ -28,10 +28,32 @@ ns.Defaults = {
 
     -- UI Element Toggles
     showTotalGold      = true,
+    showXpPerHour      = true,
+    showTimeToLevel    = true,
     showTotalRuns      = true,
     showRunsPerHour    = true,
     showFastestRun     = true,
     showLockoutWarning = true,
+    compactMode        = false,
+
+    -- Pricing Alerts & Blocklists
+    ahPriceSource      = "AUTO",            -- AUTO, TSM_MIN, TSM_MARKET, TSM_HIST, AUCTIONATOR, VENDOR
+    dropAlertEnabled   = true,
+    dropAlertThreshold = 20000,             -- 2g default (0 = alert on every drop)
+    globalBlacklist    = {},
+
+    -- Bags
+    showBagSpace       = true,
+
+    -- Timer automation
+    autoPauseAFK       = true,
+    autoPauseCity      = true,
+
+    -- Progress bar
+    showGoalBar        = true,
+    sessionGoalCopper  = 10000000 -- 100g default
+
+
 }
 
 function ns:RegisterModule(name, tbl)

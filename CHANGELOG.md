@@ -3,7 +3,28 @@
 ### `CHANGELOG.md`
 
 ```markdown
-# Changelog
+## [0.0.4] - 2026-11-22
+
+### Added
+* **Session History Log (`/ft history` or header icon):** Automatically logs sessions over 10 seconds when you hit Reset (stores up to 50 sessions). Hovering a row shows the full breakdown, including repairs, XP, runs, and background mob kills.
+* **XP / Hour & Time to Level (TTL):** Tracks session XP/hr and estimated time to next level. Both rows hide automatically at level 60.
+* **Net Profit & Repair Tracking:** Tracks personal vendor repairs (including auto-repair addons, ignoring guild bank repairs) and factors them into Net Session Profit and Net Gold/Hr.
+* **Loot Ignore & Global Blocklist:** Right-click any item in the Loot Window to ignore it for the current session or add it to a global blocklist.
+* **High-Value Drop Alert:** Plays a coin sound and shows a brief on-screen flash banner when a drop meets or exceeds your configured threshold (defaults to `2g`; set to `0c` to alert on all drops). Added `/ft testalert` to preview it.
+* **Configurable AH Price Source:** Added a dropdown in Settings to pick between Auto, TSM (Min Buyout, Market, Historical), Auctionator, or Vendor Only.
+* **Free Bag Slots Counter:** Optional row that turns orange at 5 or fewer free slots and red when bags are full.
+* **Auto-Pause:** Options to automatically pause the timer when flagging AFK or entering a city/rested area.
+* **Session Gold Goal Bar:** Optional progress bar at the bottom of the tracker with a configurable gold target.
+* **Compact Mode:** Header toggle (`-` / `+`) to collapse the tracker down to a single timer and GPH line.
+
+### Changed
+* Made TradeSkillMaster and Auctionator optional dependencies. If neither is installed, the tracker falls back to Vendor + Raw gold automatically.
+* Font dropdown now pulls all locale-valid fonts from `LibSharedMedia-3.0` with a scrollbar.
+* Settings window now dynamically resizes to fit its controls and closes when pressing `ESC`.
+
+### Fixed
+* Fixed blank font previews in the font dropdown for unavailable/missing font files.
+* Clamped text inside the Font Family and AH Price Source buttons so long names no longer overflow the button borders.v
 
 ## [0.0.3] - 2026-11-21
 ### Changed

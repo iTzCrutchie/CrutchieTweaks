@@ -6,6 +6,7 @@
 ## Category: Economy
 ## IconTexture: Interface\AddOns\FarmTracker\Media\icon
 ## SavedVariables: FarmTrackerDB
+## OptionalDeps: TradeSkillMaster, Auctionator
 
 # Core
 Core\Init.lua
@@ -13,6 +14,7 @@ Core\Core.lua
 
 # Modules
 Modules\FarmTimer.lua
+Modules\History.lua
 Modules\Options.lua
 Modules\MinimapButton.lua
 Modules\VersionCheck.lua
