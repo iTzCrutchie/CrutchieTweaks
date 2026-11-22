@@ -3,7 +3,6 @@ local addonName, ns = ...
 local mod = ns:RegisterModule("MinimapButton", {})
 local button = nil
 
--- Pulls the exact IconTexture path defined in CrutchieTweaks.toc, with a Media\icon fallback
 local function GetAddonIconPath()
     local tocIcon
     if C_AddOns and C_AddOns.GetAddOnMetadata then
@@ -15,7 +14,7 @@ local function GetAddonIconPath()
     if tocIcon and tocIcon ~= "" then
         return tocIcon
     end
-    return "Interface\\AddOns\\" .. addonName .. "\\Media\\CrutchieTweaks"
+    return "Interface\\AddOns\\" .. addonName .. "\\Media\\icon"
 end
 
 local function UpdatePosition(angle)
@@ -39,7 +38,7 @@ function mod:Refresh()
 end
 
 function mod:OnInit()
-    local btn = CreateFrame("Button", "CrutchieTweaksMinimapButton", Minimap)
+    local btn = CreateFrame("Button", "FarmTrackerMinimapButton", Minimap)
     btn:SetSize(31, 31)
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
@@ -58,7 +57,6 @@ function mod:OnInit()
     icon:SetTexture(GetAddonIconPath())
     icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
 
-    -- Clip square .tga logo into a clean circle inside the minimap border
     local mask = btn:CreateMaskTexture()
     mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     mask:SetAllPoints(icon)
@@ -96,7 +94,7 @@ function mod:OnInit()
 
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cff00ccffCrutchie's|r Farm Tracker", 1, 1, 1)
+        GameTooltip:AddLine("|cff00ccffFarm|r Tracker", 1, 1, 1)
         GameTooltip:AddLine("|cff00ff00Left-Click:|r Toggle Farm Tracker", 0.9, 0.9, 0.9)
         GameTooltip:AddLine("|cffffff00Right-Click:|r Open Settings", 0.9, 0.9, 0.9)
         GameTooltip:AddLine("|cffaaaaaaDrag:|r Move Icon", 0.7, 0.7, 0.7)

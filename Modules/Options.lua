@@ -4,7 +4,6 @@ local mod = ns:RegisterModule("Options", {})
 local optFrame = nil
 local fontDropdown = nil
 
--- Built-in Blizzard fonts (plus Expressway if provided by LibSharedMedia-3.0)
 local function GetAvailableFonts()
     local fonts = {
         { name = "Friz Quadrata", path = "Fonts\\FRIZQT__.TTF" },
@@ -69,7 +68,7 @@ local function ToggleFontDropdown(anchorBtn)
     local fonts = GetAvailableFonts()
 
     if not fontDropdown then
-        local dd = CreateFrame("Frame", "CrutchieFontDropdown", optFrame, "BackdropTemplate")
+        local dd = CreateFrame("Frame", "FarmTrackerFontDropdown", optFrame, "BackdropTemplate")
         dd:SetWidth(140)
         dd:SetFrameStrata("TOOLTIP")
         dd:SetClampedToScreen(true)
@@ -132,8 +131,8 @@ end
 local function CreateOptionsUI()
     if optFrame then return optFrame end
 
-    local f = CreateFrame("Frame", "CrutchieTweaksOptionsFrame", UIParent, "BackdropTemplate")
-    f:SetSize(316, 468)
+    local f = CreateFrame("Frame", "FarmTrackerOptionsFrame", UIParent, "BackdropTemplate")
+    f:SetSize(316, 444)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -149,7 +148,7 @@ local function CreateOptionsUI()
 
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 14, -12)
-    title:SetText("|cff00ccffCrutchieTweaks|r Settings")
+    title:SetText("|cff00ccffFarm Tracker|r Settings")
 
     local closeBtn = CreateFrame("Button", nil, f)
     closeBtn:SetSize(20, 20)
@@ -201,16 +200,16 @@ local function CreateOptionsUI()
     sizeValLbl:SetText("11px")
     f.sizeValLbl = sizeValLbl
 
-    local slider = CreateFrame("Slider", "CrutchieFontSizeSlider", f, "OptionsSliderTemplate")
+    local slider = CreateFrame("Slider", "FarmTrackerFontSizeSlider", f, "OptionsSliderTemplate")
     slider:SetWidth(280)
     slider:SetHeight(16)
     slider:SetPoint("TOP", 0, -122)
     slider:SetMinMaxValues(8, 64)
     slider:SetValueStep(1)
     slider:SetObeyStepOnDrag(true)
-    if _G["CrutchieFontSizeSliderLow"] then _G["CrutchieFontSizeSliderLow"]:SetText("8px") end
-    if _G["CrutchieFontSizeSliderHigh"] then _G["CrutchieFontSizeSliderHigh"]:SetText("64px") end
-    if _G["CrutchieFontSizeSliderText"] then _G["CrutchieFontSizeSliderText"]:SetText("") end
+    if _G["FarmTrackerFontSizeSliderLow"] then _G["FarmTrackerFontSizeSliderLow"]:SetText("8px") end
+    if _G["FarmTrackerFontSizeSliderHigh"] then _G["FarmTrackerFontSizeSliderHigh"]:SetText("64px") end
+    if _G["FarmTrackerFontSizeSliderText"] then _G["FarmTrackerFontSizeSliderText"]:SetText("") end
 
     local isSyncing = false
 
@@ -229,10 +228,9 @@ local function CreateOptionsUI()
     div2:SetSize(288, 1)
     div2:SetPoint("TOP", 0, -152)
 
-    -- Checkbox helper
     f.checks = {}
     local function AddCheckbox(key, label, yOffset, onToggle)
-        local cb = CreateFrame("CheckButton", "CrutchieOptCheck_" .. key, f, "UICheckButtonTemplate")
+        local cb = CreateFrame("CheckButton", "FarmTrackerOptCheck_" .. key, f, "UICheckButtonTemplate")
         cb:SetSize(22, 22)
         cb:SetPoint("TOPLEFT", 14, yOffset)
         cb:SetScript("OnClick", function(self)
@@ -254,28 +252,25 @@ local function CreateOptionsUI()
     genHeader:SetPoint("TOPLEFT", 14, -160)
     genHeader:SetText("|cff00ccffGeneral Display|r")
 
-    AddCheckbox("timerMinimap",    "Show Minimap Button", -178)
-    AddCheckbox("timerLocked",     "Lock Window Position & Size", -202)
-    AddCheckbox("showTotalGold",   "Show Total Session Value", -226)
-    AddCheckbox("hideRaidManager", "Hide Raid Manager |cffaaaaaa(requires /reload)|r", -250, function(val)
-        ns:Print("hideRaidManager is now " .. (val and "|cff00ff00ON|r" or "|cffff3333OFF|r") .. ". Type /reload to apply.")
-    end)
+    AddCheckbox("timerMinimap",  "Show Minimap Button", -178)
+    AddCheckbox("timerLocked",   "Lock Window Position & Size", -202)
+    AddCheckbox("showTotalGold", "Show Total Session Value", -226)
 
     local div3 = f:CreateTexture(nil, "ARTWORK")
     div3:SetColorTexture(0.25, 0.25, 0.3, 0.8)
     div3:SetSize(288, 1)
-    div3:SetPoint("TOP", 0, -280)
+    div3:SetPoint("TOP", 0, -256)
 
     -- Dungeon Mode Section
     local dungHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    dungHeader:SetPoint("TOPLEFT", 14, -288)
+    dungHeader:SetPoint("TOPLEFT", 14, -264)
     dungHeader:SetText("|cff00ccffDungeon Mode Options|r")
 
-    AddCheckbox("timerAutoStart",     "Auto-Start Timer on Dungeon Entry", -306)
-    AddCheckbox("showTotalRuns",      "Show Total Runs", -330)
-    AddCheckbox("showRunsPerHour",    "Show Runs / Hour", -354)
-    AddCheckbox("showFastestRun",     "Show Fastest Run", -378)
-    AddCheckbox("showLockoutWarning", "Show Instance Lockout Warning (5/hr)", -402)
+    AddCheckbox("timerAutoStart",     "Auto-Start Timer on Dungeon Entry", -282)
+    AddCheckbox("showTotalRuns",      "Show Total Runs", -306)
+    AddCheckbox("showRunsPerHour",    "Show Runs / Hour", -330)
+    AddCheckbox("showFastestRun",     "Show Fastest Run", -354)
+    AddCheckbox("showLockoutWarning", "Show Instance Lockout Warning (5/hr)", -378)
 
     local doneBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     doneBtn:SetSize(100, 22)

@@ -5,7 +5,6 @@ local mod = ns:RegisterModule("FarmTimer", {})
 local BASE_FONT_SIZE = 11
 local BASE_WIDTH     = 276
 
--- Active state table (persisted in CrutchieTweaksDB.timerState across /reload)
 local state = {
     isRunning      = false,
     isShown        = false,
@@ -23,7 +22,6 @@ local state = {
     runTimestamps  = {},
 }
 
--- Openable clams / containers whose contents fire a second CHAT_MSG_LOOT when auto-opened
 local OPENABLE_CONTAINERS = {
     [5523]  = true, -- Small Barnacled Clam
     [5524]  = true, -- Thick-shelled Clam
@@ -68,8 +66,8 @@ local function SafeGetItemInfo(item)
 end
 
 local function InitSavedState()
-    CrutchieTweaksDB.timerState = CrutchieTweaksDB.timerState or {}
-    local saved = CrutchieTweaksDB.timerState
+    FarmTrackerDB.timerState = FarmTrackerDB.timerState or {}
+    local saved = FarmTrackerDB.timerState
 
     for k, defaultVal in pairs(state) do
         if saved[k] == nil then
@@ -172,13 +170,13 @@ local function GetItemAHValue(itemID, cleanLink, vendorUnitPrice, isBoP)
 
     if ahUnit == 0 and _G.Auctionator and _G.Auctionator.API and _G.Auctionator.API.v1 then
         if itemID and _G.Auctionator.API.v1.GetAuctionPriceByItemID then
-            local ok, val = pcall(_G.Auctionator.API.v1.GetAuctionPriceByItemID, "CrutchieTweaks", itemID)
+            local ok, val = pcall(_G.Auctionator.API.v1.GetAuctionPriceByItemID, "FarmTracker", itemID)
             if ok and type(val) == "number" and val > 0 then
                 ahUnit = val
             end
         end
         if ahUnit == 0 and cleanLink and _G.Auctionator.API.v1.GetAuctionPriceByItemLink then
-            local ok, val = pcall(_G.Auctionator.API.v1.GetAuctionPriceByItemLink, "CrutchieTweaks", cleanLink)
+            local ok, val = pcall(_G.Auctionator.API.v1.GetAuctionPriceByItemLink, "FarmTracker", cleanLink)
             if ok and type(val) == "number" and val > 0 then
                 ahUnit = val
             end
@@ -703,7 +701,7 @@ local function SendSummaryToChannel(chatType)
     end
 
     local msg = string.format(
-        "[Crutchie's Farm Tracker] %s - Session: %s%s // Total (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s",
+        "[Farm Tracker] %s - Session: %s%s // Total (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s",
         zoneName,
         FormatTime(state.sessionTime),
         runInfo,
@@ -720,7 +718,7 @@ end
 
 local function TogglePostMenu(anchorBtn)
     if not postMenu then
-        local m = CreateFrame("Frame", "CrutchieFarmPostMenu", UIParent, "BackdropTemplate")
+        local m = CreateFrame("Frame", "FarmTrackerPostMenu", UIParent, "BackdropTemplate")
         m:SetSize(130, 122)
         m:SetFrameStrata("DIALOG")
         m:SetClampedToScreen(true)
@@ -764,7 +762,7 @@ end
 local function CreateLootPanel(parentFrame, toggleTabBtn)
     if lootFrame then return lootFrame end
 
-    local lf = CreateFrame("Frame", "CrutchieTweaksLootFrame", parentFrame, "BackdropTemplate")
+    local lf = CreateFrame("Frame", "FarmTrackerLootFrame", parentFrame, "BackdropTemplate")
     lf:SetWidth(244)
     lf:SetHeight(parentFrame:GetHeight())
     lf:SetPoint("TOPLEFT", toggleTabBtn, "TOPRIGHT", 1, 24)
@@ -806,7 +804,7 @@ local function CreateLootPanel(parentFrame, toggleTabBtn)
     div:SetSize(224, 1)
     div:SetPoint("TOP", 0, -26)
 
-    local scrollFrame = CreateFrame("ScrollFrame", "CrutchieFarmLootScroll", lf, "UIPanelScrollFrameTemplate")
+    local scrollFrame = CreateFrame("ScrollFrame", "FarmTrackerLootScroll", lf, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 8, -32)
     scrollFrame:SetPoint("BOTTOMRIGHT", -28, 10)
 
@@ -831,7 +829,7 @@ end
 local function CreateTimerUI()
     if uiFrame then return uiFrame end
 
-    local f = CreateFrame("Frame", "CrutchieTweaksTimerFrame", UIParent, "BackdropTemplate")
+    local f = CreateFrame("Frame", "FarmTrackerFrame", UIParent, "BackdropTemplate")
     f:SetSize(BASE_WIDTH, 320)
     f:SetFrameStrata("MEDIUM")
     f:SetMovable(true)
@@ -866,7 +864,7 @@ local function CreateTimerUI()
     -- Header Bar
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", 10, -8)
-    title:SetText("|cff00ccffCrutchie's|r Farm Tracker")
+    title:SetText("|cff00ccffFarm|r Tracker")
     f.title = title
 
     local closeBtn = CreateFrame("Button", nil, f)
@@ -880,7 +878,6 @@ local function CreateTimerUI()
         f:Hide()
     end)
 
-    -- Options Gear Icon Button
     local optBtn = CreateFrame("Button", nil, f)
     optBtn:SetSize(16, 16)
     optBtn:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
@@ -897,7 +894,6 @@ local function CreateTimerUI()
         if optMod and optMod.ToggleUI then optMod:ToggleUI() end
     end)
 
-    -- Lock / Unlock Position & Size Button
     local lockBtn = CreateFrame("Button", nil, f)
     lockBtn:SetSize(18, 18)
     lockBtn:SetPoint("RIGHT", optBtn, "LEFT", -2, 0)
@@ -916,8 +912,7 @@ local function CreateTimerUI()
     end)
     f.lockBtn = lockBtn
 
-    -- Dungeon Mode Checkbox in Header
-    local dungeonCheck = CreateFrame("CheckButton", "CrutchieFarmDungeonCheck", f, "UICheckButtonTemplate")
+    local dungeonCheck = CreateFrame("CheckButton", "FarmTrackerDungeonCheck", f, "UICheckButtonTemplate")
     dungeonCheck:SetSize(18, 18)
     dungeonCheck:SetPoint("RIGHT", lockBtn, "LEFT", -36, 0)
     dungeonCheck:SetScript("OnClick", function(self)
@@ -931,8 +926,7 @@ local function CreateTimerUI()
     dungeonCheckLbl:SetText("|cffccccccDung|r")
     f.dungeonCheck = dungeonCheck
 
-    -- Collapsible Side Arrow Tab for Loot Window
-    local lootToggleBtn = CreateFrame("Button", "CrutchieFarmLootToggle", f, "BackdropTemplate")
+    local lootToggleBtn = CreateFrame("Button", "FarmTrackerLootToggle", f, "BackdropTemplate")
     lootToggleBtn:SetSize(18, 48)
     lootToggleBtn:SetPoint("TOPLEFT", f, "TOPRIGHT", -1, -24)
     lootToggleBtn:SetNormalFontObject("GameFontNormal")
@@ -1079,7 +1073,6 @@ local function CreateTimerUI()
         TogglePostMenu(self)
     end)
 
-    -- Bottom-Right Drag-to-Resize Handle (auto-adjusts font size & syncs Options slider)
     local resizeBtn = CreateFrame("Button", nil, f)
     resizeBtn:SetSize(14, 14)
     resizeBtn:SetPoint("BOTTOMRIGHT", -2, 2)

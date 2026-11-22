@@ -1,4 +1,4 @@
-package-as: CrutchieTweaks
+package-as: FarmTracker
 
 ignore:
   - README.md

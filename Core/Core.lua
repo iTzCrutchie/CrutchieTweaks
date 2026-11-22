@@ -1,48 +1,65 @@
 local addonName, ns = ...
 
+local function ApplyDefaults(db, defaults)
+    for k, v in pairs(defaults) do
+        if db[k] == nil then
+            if type(v) == "table" then
+                db[k] = {}
+                ApplyDefaults(db[k], v)
+            else
+                db[k] = v
+            end
+        end
+    end
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
-        CrutchieTweaksDB = CrutchieTweaksDB or {}
-        for k, v in pairs(ns.Defaults) do
-            if CrutchieTweaksDB[k] == nil then
-                CrutchieTweaksDB[k] = v
-            end
-        end
-        ns.db = CrutchieTweaksDB
+        FarmTrackerDB = FarmTrackerDB or {}
+        ApplyDefaults(FarmTrackerDB, ns.Defaults)
+        ns.db = FarmTrackerDB
+        self:UnregisterEvent("ADDON_LOADED")
 
     elseif event == "PLAYER_LOGIN" then
         local hasErrors = false
-
-        for name, module in pairs(ns.Modules) do
-            if module.OnInit then
-                local ok, err = pcall(module.OnInit, module)
+        for name, mod in pairs(ns.Modules) do
+            if type(mod.OnInit) == "function" then
+                local ok, err = pcall(mod.OnInit, mod)
                 if not ok then
                     hasErrors = true
-                    ns:Print(ns.Colors.red .. "Error loading module [" .. name .. "]: " .. tostring(err) .. ns.Colors.reset)
+                    ns:Print(ns.Colors.red .. "Error loading module '" .. name .. "': " .. tostring(err) .. ns.Colors.reset)
                 end
             end
         end
 
         if not hasErrors then
-            ns:Print(ns.Colors.green .. "Loaded successfully. Type /ct for options." .. ns.Colors.reset)
+            ns:Print(ns.Colors.green .. "by Crutchie loaded successfully. " .. ns.Colors.reset .. "Type /ft for options." .. ns.Colors.reset)
         else
-            ns:Print(ns.Colors.red .. "Loaded with errors." .. ns.Colors.reset)
+            ns:Print(ns.Colors.red .. "Loaded with error." .. ns.Colors.reset)
         end
+        self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)
 
--- Slash Commands (/ct or /crutchietweaks)
-SLASH_CRUTCHIETWEAKS1 = "/ct"
-SLASH_CRUTCHIETWEAKS2 = "/crutchietweaks"
+-- Slash Commands (/ft or /farmtracker)
+SLASH_FARMTRACKER1 = "/ft"
+SLASH_FARMTRACKER2 = "/farmtracker"
 
-SlashCmdList["CRUTCHIETWEAKS"] = function(msg)
-    local cmd = string.lower(strtrim(msg or ""))
+SlashCmdList["FARMTRACKER"] = function(msg)
+    local cmd = string.lower(string.match(msg or "", "^%s*(%S*)") or "")
 
-    -- Open In-Game Settings Menu
+    if cmd == "" or cmd == "timer" or cmd == "t" then
+        local timerMod = ns.Modules["FarmTimer"]
+        if timerMod and timerMod.ToggleUI then
+            timerMod:ToggleUI()
+        end
+        return
+    end
+
     if cmd == "config" or cmd == "options" or cmd == "menu" then
         local optMod = ns.Modules["Options"]
         if optMod and optMod.ToggleUI then
@@ -51,18 +68,6 @@ SlashCmdList["CRUTCHIETWEAKS"] = function(msg)
         return
     end
 
-    -- Toggle Farm Timer UI
-    if cmd == "timer" or cmd == "t" then
-        local timerMod = ns.Modules["FarmTimer"]
-        if timerMod and timerMod.ToggleUI then
-            timerMod:ToggleUI()
-        else
-            ns:Print(ns.Colors.red .. "FarmTimer module is disabled or not loaded." .. ns.Colors.reset)
-        end
-        return
-    end
-
-    -- debug
     if cmd == "debug" then
         local timerMod = ns.Modules["FarmTimer"]
         if timerMod and timerMod.ToggleDebug then
@@ -71,28 +76,8 @@ SlashCmdList["CRUTCHIETWEAKS"] = function(msg)
         return
     end
 
-    if cmd == "" or cmd == "help" then
-        ns:Print("Commands & Toggles (toggles require /reload):")
-        DEFAULT_CHAT_FRAME:AddMessage("  |cff00ccff/ct timer|r - Open/Close the Solo Farm Timer")
-        for k, v in pairs(ns.db) do
-            if type(v) == "boolean" then
-                local state = v and (ns.Colors.green .. "ON" .. ns.Colors.reset) or (ns.Colors.red .. "OFF" .. ns.Colors.reset)
-                DEFAULT_CHAT_FRAME:AddMessage("  |cffffff00" .. k .. "|r: " .. state)
-            end
-        end
-        DEFAULT_CHAT_FRAME:AddMessage("Usage: |cff00ccff/ct <setting>|r to toggle.")
-        return
-    end
-
-    -- Case-insensitive lookup in ns.db
-    for k, v in pairs(ns.db) do
-        if string.lower(k) == cmd and type(v) == "boolean" then
-            ns.db[k] = not v
-            local state = ns.db[k] and (ns.Colors.green .. "ON" .. ns.Colors.reset) or (ns.Colors.red .. "OFF" .. ns.Colors.reset)
-            ns:Print(k .. " is now " .. state .. ". Type |cffffff00/reload|r to apply.")
-            return
-        end
-    end
-
-    ns:Print(ns.Colors.red .. "Unknown setting: " .. cmd .. ns.Colors.reset)
+    ns:Print("Commands:")
+    print("  |cffffff00/ft|r (or |cffffff00/ft timer|r) - Toggle Farm Tracker window.")
+    print("  |cffffff00/ft config|r - Open Settings menu.")
+    print("  |cffffff00/ft debug|r - Toggle loot/coin debug output.")
 end

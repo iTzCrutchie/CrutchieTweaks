@@ -1,0 +1,18 @@
+## Interface: 16001
+## Title: |cff00ccffFarm Tracker|r
+## Notes: Farm Tracker for solo and dungeons that shows gold-per-hour and loot
+## Author: Crutchie
+## Version: @project-version@
+## Category: Economy
+## IconTexture: Interface\AddOns\FarmTracker\Media\icon
+## SavedVariables: FarmTrackerDB
+
+# Core
+Core\Init.lua
+Core\Core.lua
+
+# Modules
+Modules\FarmTimer.lua
+Modules\Options.lua
+Modules\MinimapButton.lua
+Modules\VersionCheck.lua

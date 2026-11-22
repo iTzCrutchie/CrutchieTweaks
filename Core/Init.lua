@@ -4,7 +4,7 @@ ns.AddonName = addonName
 ns.Modules   = {}
 
 ns.Colors = {
-    prefix = "|cff00ccff[CrutchieTweaks]|r ",
+    prefix = "|cff00ccff[FarmTracker]|r ",
     green  = "|cff00ff00",
     red    = "|cffff3333",
     yellow = "|cffffff00",
@@ -12,17 +12,16 @@ ns.Colors = {
 }
 
 ns.Defaults = {
-    hideRaidManager    = false,
     farmTimer          = true,
     timerDungeonMode   = true,
     timerVendorOnly    = false,
     timerLootOpen      = false,
     timerLootMinQual   = 0,                 -- 0=All, 1=Common+, 2=Uncommon+, 3=Rare+, 4=Epic+, 5=Legendary+
     timerTheme         = "dark",            -- "dark" or "classic"
-    timerFont          = "Friz Quadrata",   -- Built-in Blizzard fonts (+ Expressway if LibSharedMedia is loaded)
-    timerFontSize      = 11,                -- Numeric pixel size (8 - 64)
-    timerLocked        = false,
+    timerFont          = "Friz Quadrata",
+    timerFontSize      = 11,                -- 8 - 64 px
     timerAutoStart     = true,
+    timerLocked        = false,
     timerMinimap       = true,
     timerMinimapAngle  = 220,
     timerPos           = { point = "CENTER", x = 0, y = 120 },

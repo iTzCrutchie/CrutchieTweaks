@@ -5,6 +5,13 @@
 ```markdown
 # Changelog
 
+## [0.0.3] - 2026-11-21
+### Changed
+* Renamed to just FarmTracker
+
+### Removed
+* Removed the hideRaidManager functionality completely
+
 ## [0.0.2] - 2026-11-20
 ### Added
 * Collapsible loot window attached to the Farm Tracker with a quality filter (All, Common+, Uncommon+, Rare+, Epic+, Legendary+).
