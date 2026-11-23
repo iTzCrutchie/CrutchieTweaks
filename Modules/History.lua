@@ -110,9 +110,6 @@ function mod:RefreshList()
                 GameTooltip:AddDoubleLine("Raw Looted Coin:", Utils.FormatMoneyUI(e.rawCopper), 0.7, 0.7, 0.7, 1, 1, 1)
                 GameTooltip:AddDoubleLine("Items (Vendor):", Utils.FormatMoneyUI(e.vendorCopper), 0.7, 0.7, 0.7, 1, 1, 1)
                 GameTooltip:AddDoubleLine("Items (AH / Est):", Utils.FormatMoneyUI(e.ahCopper), 0.7, 0.7, 0.7, 1, 1, 1)
-                if (e.repairCopper or 0) > 0 then
-                    GameTooltip:AddDoubleLine("Repair Costs:", "|cffff5555-|r" .. Utils.FormatMoneyUI(e.repairCopper), 1, 0.4, 0.4, 1, 0.4, 0.4)
-                end
                 GameTooltip:AddDoubleLine("|cffffd700Net Profit:|r", Utils.FormatMoneyUI(e.netCopper), 1, 0.85, 0, 1, 1, 1)
                 GameTooltip:AddDoubleLine("|cff00ccffNet Gold / Hr:|r", Utils.FormatMoneyUI(e.gphCopper) .. "/hr", 0, 0.8, 1, 1, 1, 1)
 
@@ -134,7 +131,6 @@ function mod:RefreshList()
             row:SetScript("OnClick", function(self)
                 local e = self.entryData
                 if not e then return end
-                local repairStr = (e.repairCopper or 0) > 0 and (" // Repairs: -" .. Utils.FormatMoneyPlain(e.repairCopper)) or ""
                 local runStr    = (e.runs or 0) > 0 and (" // Runs: " .. e.runs) or ""
                 local text = string.format(
                     "[Farm Tracker] %s (%s) - Time: %s%s // Net (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s%s",
@@ -147,8 +143,7 @@ function mod:RefreshList()
                     Utils.FormatMoneyPlain(e.gphCopper),
                     Utils.FormatMoneyPlain(e.rawCopper),
                     Utils.FormatMoneyPlain(e.vendorCopper),
-                    Utils.FormatMoneyPlain(e.ahCopper),
-                    repairStr
+                    Utils.FormatMoneyPlain(e.ahCopper)
                 )
                 Utils.ShowCopyPopup(text, "|cff00ccffCopy Session Summary|r")
             end)

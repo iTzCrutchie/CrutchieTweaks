@@ -18,7 +18,6 @@ local state = {
     rawCopper      = 0,
     vendorCopper   = 0,
     ahCopper       = 0,
-    repairCopper   = 0,
     sessionXP      = 0,
     lastSaveTime   = nil,
     lootLog        = {},
@@ -41,11 +40,8 @@ local lastXP                = 0
 local lastXPMax             = 0
 local lastLevel             = 0
 local lastMoney             = 0
-local lastRepairCost        = 0
 local pendingMoneySpent     = 0
 local pendingMoneyTime      = 0
-local pendingRepairDrop     = 0
-local pendingRepairDropTime = 0
 
 local function DebugPrint(msg)
     if debugMode then
@@ -319,7 +315,6 @@ local function ApplyLayoutMode()
     PlaceRow(uiFrame.rows.raw,     true)
     PlaceRow(uiFrame.rows.vendor,  true)
     PlaceRow(uiFrame.rows.ah,      ns.Pricing.HasAnyAHAddon())
-    PlaceRow(uiFrame.rows.repairs, ns.db.showRepairCosts ~= false)
 
     y = y - 2
     uiFrame.div3:ClearAllPoints()
@@ -360,8 +355,7 @@ local function UpdateDisplay()
     local Pricing      = ns.Pricing
     local useVendor    = Pricing.IsVendorOnlyMode()
     local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
-    local repairCopper = state.repairCopper or 0
-    local netCopper    = (state.rawCopper + itemTotal) - repairCopper
+    local netCopper    = (state.rawCopper + itemTotal)
     local gphCopper    = 0
     local rph          = 0
     local xph          = 0
@@ -394,7 +388,6 @@ local function UpdateDisplay()
     uiFrame.rows.raw.val:SetText(Utils.FormatMoneyUI(state.rawCopper))
     uiFrame.rows.vendor.val:SetText(Utils.FormatMoneyUI(state.vendorCopper))
     uiFrame.rows.ah.val:SetText(Utils.FormatMoneyUI(state.ahCopper))
-    uiFrame.rows.repairs.val:SetText(repairCopper > 0 and ("|cffff5555-|r" .. Utils.FormatMoneyUI(repairCopper)) or "0c")
 
     if not Pricing.HasAnyAHAddon() then
         uiFrame.valModeBtn:SetText("|cffaaaaaaVendor + Raw|r")
@@ -522,8 +515,7 @@ local function SaveCurrentSessionToHistory()
 
     local useVendor    = ns.Pricing.IsVendorOnlyMode()
     local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
-    local repairCopper = state.repairCopper or 0
-    local netCopper    = (state.rawCopper + itemTotal) - repairCopper
+    local netCopper    = (state.rawCopper + itemTotal)
     local sessionHours = state.sessionTime / 3600
     local gphCopper    = (sessionHours > 0) and (netCopper / sessionHours) or 0
     local itemCounts = {}
@@ -544,7 +536,6 @@ local function SaveCurrentSessionToHistory()
         rawCopper    = state.rawCopper or 0,
         vendorCopper = state.vendorCopper or 0,
         ahCopper     = state.ahCopper or 0,
-        repairCopper = repairCopper,
         netCopper    = netCopper,
         gphCopper    = gphCopper,
         items        = itemCounts,
@@ -558,8 +549,7 @@ local function BuildSummaryString()
     local useVendor    = ns.Pricing.IsVendorOnlyMode()
     local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
     local modeTag      = useVendor and "Vendor" or "AH"
-    local repairCopper = state.repairCopper or 0
-    local netCopper    = (state.rawCopper + itemTotal) - repairCopper
+    local netCopper    = (state.rawCopper + itemTotal)
     local sessionHours = (state.sessionTime >= 1) and (state.sessionTime / 3600) or 0
     local gphCopper    = (sessionHours > 0) and (netCopper / sessionHours) or 0
     local rph          = (sessionHours > 0) and (state.completedRuns / sessionHours) or 0
@@ -572,8 +562,6 @@ local function BuildSummaryString()
         runInfo = string.format(" [Runs: %d (%.1f/hr)%s%s]", state.completedRuns, rph, lastStr, fastStr)
     end
 
-    local repairInfo = (repairCopper > 0) and (" // Repairs: -" .. Utils.FormatMoneyPlain(repairCopper)) or ""
-
     return string.format(
         "[Farm Tracker] %s - Session: %s%s // Net (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s%s",
         zoneName,
@@ -584,8 +572,7 @@ local function BuildSummaryString()
         Utils.FormatMoneyPlain(gphCopper),
         Utils.FormatMoneyPlain(state.rawCopper),
         Utils.FormatMoneyPlain(state.vendorCopper),
-        Utils.FormatMoneyPlain(state.ahCopper),
-        repairInfo
+        Utils.FormatMoneyPlain(state.ahCopper)
     )
 end
 
@@ -891,7 +878,6 @@ local function CreateTimerUI()
     CreateStatRow("raw",       "|cffaaaaaaRaw Looted Coin:|r", "0c")
     CreateStatRow("vendor",    "|cffaaaaaaItems (Vendor):|r", "0c")
     CreateStatRow("ah",        "|cffaaaaaaItems (AH / Est):|r", "0c")
-    CreateStatRow("repairs",   "|cffff6666Repair Costs:|r", "0c")
     CreateStatRow("total",     "|cffffd700Net Session Profit:|r", "0c")
     CreateStatRow("gph",       "|cff00ccffNet Gold / Hr:|r", "0c/hr")
     CreateStatRow("xph",       "|cffc080ffSession XP / Hr:|r", "0/hr")
@@ -968,7 +954,6 @@ local function CreateTimerUI()
         state.rawCopper      = 0
         state.vendorCopper   = 0
         state.ahCopper       = 0
-        state.repairCopper   = 0
         state.sessionXP      = 0
         state.lastSaveTime   = GetTime()
         wipe(state.lootLog)
@@ -1146,39 +1131,6 @@ local function CheckAutoStartDungeon()
     wasInDungeon = isDungeon
 end
 
-local function GetCurrentRepairCost()
-    if not _G.GetRepairAllCost then return 0 end
-    local cost, canRepair = GetRepairAllCost()
-    if canRepair and cost and cost > 0 then
-        return cost
-    end
-    return 0
-end
-
-local function TryMatchRepair()
-    local now = GetTime()
-    if pendingMoneySpent > 0 and pendingRepairDrop > 0 then
-        if math.abs(pendingMoneyTime - pendingRepairDropTime) <= 2 then
-            if pendingMoneySpent <= (pendingRepairDrop + 5) then
-                if state.isRunning or (state.sessionTime or 0) > 0 then
-                    state.repairCopper = (state.repairCopper or 0) + pendingMoneySpent
-                    DebugPrint("Recorded repair cost: " .. pendingMoneySpent .. "c")
-                    UpdateDisplay()
-                end
-                pendingMoneySpent = 0
-                pendingRepairDrop = 0
-            end
-        end
-    end
-
-    if pendingMoneySpent > 0 and (now - pendingMoneyTime) > 2 then
-        pendingMoneySpent = 0
-    end
-    if pendingRepairDrop > 0 and (now - pendingRepairDropTime) > 2 then
-        pendingRepairDrop = 0
-    end
-end
-
 function mod:OnInit()
     if not ns.db.farmTimer then return end
 
@@ -1189,7 +1141,6 @@ function mod:OnInit()
     lastXPMax      = UnitXPMax("player") or 0
     lastLevel      = UnitLevel("player") or 1
     lastMoney      = GetMoney() or 0
-    lastRepairCost = GetCurrentRepairCost()
 
     local tracker = CreateFrame("Frame")
     tracker:RegisterEvent("CHAT_MSG_MONEY")
@@ -1200,9 +1151,7 @@ function mod:OnInit()
     tracker:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     tracker:RegisterEvent("PLAYER_XP_UPDATE")
     tracker:RegisterEvent("PLAYER_LEVEL_UP")
-    tracker:RegisterEvent("MERCHANT_SHOW")
     tracker:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
-    tracker:RegisterEvent("PLAYER_MONEY")
     tracker:RegisterEvent("BAG_UPDATE_DELAYED")
     tracker:RegisterEvent("PLAYER_FLAGS_CHANGED")
     tracker:RegisterEvent("PLAYER_UPDATE_RESTING")
@@ -1215,7 +1164,6 @@ function mod:OnInit()
 
         elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
             CheckAutoStartDungeon()
-            lastRepairCost = GetCurrentRepairCost()
 
         elseif event == "BAG_UPDATE_DELAYED" then
             UpdateDisplay()
@@ -1255,41 +1203,6 @@ function mod:OnInit()
                 autoPausedReason   = nil
                 UpdateDisplay()
                 ns:Print("Auto-resumed timer (|cff00ff00Entered Combat|r).")
-            end
-
-        elseif event == "MERCHANT_SHOW" then
-            lastMoney = GetMoney() or lastMoney
-            local curCost = GetCurrentRepairCost()
-            if curCost > 0 then
-                lastRepairCost = curCost
-            end
-
-        elseif event == "UPDATE_INVENTORY_DURABILITY" then
-            local curCost = GetCurrentRepairCost()
-            if curCost < lastRepairCost then
-                pendingRepairDrop     = lastRepairCost - curCost
-                pendingRepairDropTime = GetTime()
-                lastRepairCost        = curCost
-                TryMatchRepair()
-            else
-                lastRepairCost = curCost
-            end
-
-        elseif event == "PLAYER_MONEY" then
-            local curMoney = GetMoney() or 0
-            local spent    = lastMoney - curMoney
-            lastMoney      = curMoney
-
-            if spent > 0 then
-                local curCost = GetCurrentRepairCost()
-                if curCost < lastRepairCost then
-                    pendingRepairDrop     = lastRepairCost - curCost
-                    pendingRepairDropTime = GetTime()
-                    lastRepairCost        = curCost
-                end
-                pendingMoneySpent = spent
-                pendingMoneyTime  = GetTime()
-                TryMatchRepair()
             end
 
         elseif event == "PLAYER_XP_UPDATE" then

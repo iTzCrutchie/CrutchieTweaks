@@ -38,7 +38,6 @@ ns.Defaults = {
 
     -- UI Element Toggles
     showTotalGold      = true,
-    showRepairCosts    = true,
     showXpPerHour      = true,
     showTimeToLevel    = true,
     showTotalRuns      = true,

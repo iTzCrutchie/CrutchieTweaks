@@ -650,7 +650,6 @@ local function CreateOptionsUI()
 
     _, y = AddHeader(pDisp, "|cff00ccffGeneral Stats|r", y)
     y = AddCheckbox(pDisp, "showTotalGold",   "Show Net Session Profit", y)
-    y = AddCheckbox(pDisp, "showRepairCosts", "Show Repair Costs", y)
     y = AddCheckbox(pDisp, "showXpPerHour",   "Show XP / Hour |cffaaaaaa(hidden at 60)|r", y)
     y = AddCheckbox(pDisp, "showTimeToLevel", "Show Time to Level |cffaaaaaa(hidden at 60)|r", y)
     y = AddCheckbox(pDisp, "showBagSpace",    "Show Free Bag Slots", y)
