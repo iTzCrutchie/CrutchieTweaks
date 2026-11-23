@@ -7,4 +7,5 @@ ignore:
   - .github
   - Modules/Template.lua
   - Media/*.png
+  - Media/*.jpg
   - Media/*.webp
