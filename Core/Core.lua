@@ -68,6 +68,14 @@ SlashCmdList["FARMTRACKER"] = function(msg)
         return
     end
 
+    if cmd == "farms" or cmd == "farm" or cmd == "finder" then
+        local ffMod = ns.Modules["FarmFinder"]
+        if ffMod and ffMod.ToggleUI then
+            ffMod:ToggleUI()
+        end
+        return
+    end
+
     if cmd == "config" or cmd == "options" or cmd == "menu" then
         local optMod = ns.Modules["Options"]
         if optMod and optMod.ToggleUI then
@@ -95,6 +103,7 @@ SlashCmdList["FARMTRACKER"] = function(msg)
     ns:Print("Commands:")
     print("  |cffffff00/ft|r (or |cffffff00/ft timer|r) - Toggle Farm Tracker window.")
     print("  |cffffff00/ft history|r - Open Session History log.")
+    print("  |cffffff00/ft farms|r - Open the farm finder window to show best GPH farms")
     print("  |cffffff00/ft config|r - Open Settings menu.")
     print("  |cffffff00/ft testalert|r - Preview the High-Value Drop Alert.")
     print("  |cffffff00/ft debug|r - Toggle loot/coin debug output.")

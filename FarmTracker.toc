@@ -18,6 +18,16 @@ Modules\Pricing.lua
 Modules\LootWindow.lua
 Modules\Tracker.lua
 Modules\History.lua
+
+# Data for Farms
+Data\Data.lua
+Data\Mining.lua
+Data\Herbalism.lua
+Data\Skinning.lua
+Data\Cloth.lua
+Data\Fishing.lua
+
+Modules\FarmFinder.lua
 Modules\Options.lua
 Modules\MinimapButton.lua
 Modules\VersionCheck.lua

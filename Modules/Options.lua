@@ -112,17 +112,29 @@ local function NotifyRefresh()
     Utils.ApplyBackdropTheme(priceDropdown, false, false)
     Utils.ApplyBackdropTheme(soundDropdown, false, false)
 
+    -- Main farm tracking window
     local trackerMod = ns.Modules["Tracker"]
     if trackerMod and trackerMod.RefreshSettings then
         trackerMod:RefreshSettings()
     end
+
+    -- MinimapButton
     local miniMod = ns.Modules["MinimapButton"]
     if miniMod and miniMod.Refresh then
         miniMod:Refresh()
     end
+
+    -- History
     local histMod = ns.Modules["History"]
     if histMod and histMod.RefreshTheme then
         histMod:RefreshTheme()
+    end
+
+    -- Farm finder
+    local ffMod = ns.Modules["FarmFinder"]
+    if ffMod then
+        if ffMod.RefreshTheme then ffMod:RefreshTheme() end
+        if ffMod.RefreshList then ffMod:RefreshList() end
     end
 end
 

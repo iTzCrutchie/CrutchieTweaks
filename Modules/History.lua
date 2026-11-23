@@ -14,7 +14,7 @@ end
 function mod:SaveSession(entry)
     if not entry then return end
     local list = EnsureHistoryDB()
-    table.insert(list, 1, entry) -- newest first
+    table.insert(list, 1, entry)
     while #list > MAX_HISTORY do
         table.remove(list)
     end
@@ -58,21 +58,34 @@ function mod:RefreshList()
             delBtn:SetText("|cffff5555x|r")
             row.delBtn = delBtn
 
+            local saveBtn = CreateFrame("Button", nil, row)
+            saveBtn:SetSize(16, 16)
+            saveBtn:SetPoint("RIGHT", delBtn, "LEFT", -2, 0)
+            saveBtn:SetNormalFontObject("GameFontHighlightSmall")
+            saveBtn:SetText("|cff00ff00+|r")
+            saveBtn:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Save this session as a Farm Finder spot", 0.2, 1, 0.2)
+                GameTooltip:Show()
+            end)
+            saveBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            row.saveBtn = saveBtn
+
             local gphTxt = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            gphTxt:SetPoint("RIGHT", delBtn, "LEFT", -6, 0)
-            gphTxt:SetWidth(90)
+            gphTxt:SetPoint("RIGHT", saveBtn, "LEFT", -6, 0)
+            gphTxt:SetWidth(86)
             gphTxt:SetJustifyH("RIGHT")
             row.gphTxt = gphTxt
 
             local netTxt = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             netTxt:SetPoint("RIGHT", gphTxt, "LEFT", -6, 0)
-            netTxt:SetWidth(75)
+            netTxt:SetWidth(72)
             netTxt:SetJustifyH("RIGHT")
             row.netTxt = netTxt
 
             local durTxt = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             durTxt:SetPoint("RIGHT", netTxt, "LEFT", -6, 0)
-            durTxt:SetWidth(52)
+            durTxt:SetWidth(50)
             durTxt:SetJustifyH("RIGHT")
             row.durTxt = durTxt
 
@@ -113,7 +126,7 @@ function mod:RefreshList()
                     end
                 end
                 GameTooltip:AddLine(" ")
-                GameTooltip:AddLine("|cffaaaaaaClick row to copy summary|r")
+                GameTooltip:AddLine("|cffaaaaaaClick row to copy summary  |  Click |cff00ff00+|cffaaaaaa to save as Farm|r")
                 GameTooltip:Show()
             end)
             row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -154,6 +167,13 @@ function mod:RefreshList()
         row.netTxt:SetText(Utils.FormatMoneyUI(entry.netCopper))
         row.gphTxt:SetText(Utils.FormatMoneyUI(entry.gphCopper) .. "/hr")
 
+        row.saveBtn:SetScript("OnClick", function()
+            local ffMod = ns.Modules["FarmFinder"]
+            if ffMod and ffMod.PromptSaveFromHistory then
+                ffMod:PromptSaveFromHistory(entry)
+            end
+        end)
+
         row.delBtn:SetScript("OnClick", function()
             table.remove(list, i)
             mod:RefreshList()
@@ -174,7 +194,7 @@ local function CreateHistoryUI()
 
     local f = CreateFrame("Frame", "FarmTrackerHistoryFrame", UIParent, "BackdropTemplate")
     tinsert(UISpecialFrames, "FarmTrackerHistoryFrame")
-    f:SetSize(490, 340)
+    f:SetSize(510, 340)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -198,7 +218,7 @@ local function CreateHistoryUI()
 
     local div1 = f:CreateTexture(nil, "ARTWORK")
     div1:SetColorTexture(0.25, 0.25, 0.3, 0.8)
-    div1:SetSize(462, 1)
+    div1:SetSize(482, 1)
     div1:SetPoint("TOP", 0, -34)
 
     -- Column Headers
@@ -207,26 +227,26 @@ local function CreateHistoryUI()
     colZone:SetText("|cffaaaaaaDate & Zone|r")
 
     local colGph = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    colGph:SetPoint("TOPRIGHT", -54, -40)
-    colGph:SetWidth(90)
+    colGph:SetPoint("TOPRIGHT", -72, -40)
+    colGph:SetWidth(86)
     colGph:SetJustifyH("RIGHT")
     colGph:SetText("|cffaaaaaaNet / Hr|r")
 
     local colNet = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     colNet:SetPoint("RIGHT", colGph, "LEFT", -6, 0)
-    colNet:SetWidth(75)
+    colNet:SetWidth(72)
     colNet:SetJustifyH("RIGHT")
     colNet:SetText("|cffaaaaaaNet Profit|r")
 
     local colDur = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     colDur:SetPoint("RIGHT", colNet, "LEFT", -6, 0)
-    colDur:SetWidth(52)
+    colDur:SetWidth(50)
     colDur:SetJustifyH("RIGHT")
     colDur:SetText("|cffaaaaaaTime|r")
 
     local div2 = f:CreateTexture(nil, "ARTWORK")
     div2:SetColorTexture(0.25, 0.25, 0.3, 0.8)
-    div2:SetSize(462, 1)
+    div2:SetSize(482, 1)
     div2:SetPoint("TOP", 0, -56)
 
     local scrollFrame = CreateFrame("ScrollFrame", "FarmTrackerHistoryScroll", f, "UIPanelScrollFrameTemplate")
@@ -234,7 +254,7 @@ local function CreateHistoryUI()
     scrollFrame:SetPoint("BOTTOMRIGHT", -32, 42)
 
     local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-    scrollChild:SetWidth(442)
+    scrollChild:SetWidth(462)
     scrollChild:SetHeight(1)
     scrollFrame:SetScrollChild(scrollChild)
 

@@ -526,6 +526,12 @@ local function SaveCurrentSessionToHistory()
     local netCopper    = (state.rawCopper + itemTotal) - repairCopper
     local sessionHours = state.sessionTime / 3600
     local gphCopper    = (sessionHours > 0) and (netCopper / sessionHours) or 0
+    local itemCounts = {}
+    for _, entry in pairs(state.lootLog) do
+        if entry.itemID and (entry.count or 0) > 0 and not ns.Pricing.IsItemBlocked(entry.itemID, state.sessionIgnored) then
+            itemCounts[entry.itemID] = (itemCounts[entry.itemID] or 0) + entry.count
+        end
+    end
 
     histMod:SaveSession({
         timestamp    = time(),
@@ -541,6 +547,7 @@ local function SaveCurrentSessionToHistory()
         repairCopper = repairCopper,
         netCopper    = netCopper,
         gphCopper    = gphCopper,
+        items        = itemCounts,
         modeTag      = useVendor and "Vendor" or "AH",
         sessionXP    = state.sessionXP or 0,
     })
@@ -722,9 +729,26 @@ local function CreateTimerUI()
         if histMod and histMod.ToggleUI then histMod:ToggleUI() end
     end)
 
+    local ffBtn = CreateFrame("Button", nil, f)
+    ffBtn:SetSize(16, 16)
+    ffBtn:SetPoint("RIGHT", histBtn, "LEFT", -3, 0)
+    ffBtn:SetNormalTexture("Interface\\Icons\\INV_Misc_Map_01")
+    ffBtn:GetNormalTexture():SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ffBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    ffBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Open Farm Finder (/ft farms)", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    ffBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    ffBtn:SetScript("OnClick", function()
+        local ffMod = ns.Modules["FarmFinder"]
+        if ffMod and ffMod.ToggleUI then ffMod:ToggleUI() end
+    end)
+
     local lockBtn = CreateFrame("Button", nil, f)
     lockBtn:SetSize(18, 18)
-    lockBtn:SetPoint("RIGHT", histBtn, "LEFT", -2, 0)
+    lockBtn:SetPoint("RIGHT", ffBtn, "LEFT", -2, 0)
     lockBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
     lockBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")

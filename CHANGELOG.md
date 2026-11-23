@@ -4,6 +4,23 @@
 
 ```markdown
 
+## [0.0.6] - 2026-11-23
+
+### Added
+* **Farm Finder (`/ft farms` or header map icon):** Added a live gold-per-hour browser that evaluates hourly item yields against your selected AH price source (TSM Min Buyout, Market, Historical, Auctionator, or Vendor).
+* **Built-In Profession Farm Data (`Data\`):** Added pre-populated Classic/WoW Forever farming routes across **Mining**, **Herbalism**, **Skinning**, **Cloth**, and **Fishing**.
+* **Save Runs from Session History (`+`):** Click the `+` button on any logged session in `/ft history` to convert its hourly coin and item yields into a custom Farm Finder entry with a chosen category and optional Routes string.
+* **Custom Farm Import & Export (`FT1:...`):** Added **Import Farm** and **Share** buttons to export and share custom farming spots (including hourly yields and optional `RoutesImportExport` strings) via copyable text strings.
+* **Continent Filters & Column Sorting:** Added continent filter buttons (**All Continents**, **Eastern Kingdoms**, **Kalimdor**), a **Custom** tab for player-created farms, and clickable ascending/descending column sorting by **Farm / Zone**, **Category**, and **Gold / Hr**.
+
+### Changed
+* Session History entries now snapshot individual non-blocked item counts when resetting a session so they can be promoted into Farm Finder entries.
+* Changing the AH Price Source in Settings now updates open Farm Finder prices live.
+
+### Fixed
+* Fixed uncached items in Farm Finder displaying as `Item #ID` with `0c` until manually refreshed by listening for `GET_ITEM_INFO_RECEIVED`.
+* Fixed a Lua table sort error (`attempt to index local 'b'`) when toggling ascending/descending column headers in Farm Finder.
+
 ## [0.0.5] - 2026-11-23
 
 ### Added
