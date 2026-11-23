@@ -37,7 +37,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         end
 
         if not hasErrors then
-            ns:Print(ns.Colors.green .. "by Crutchie loaded successfully. " .. ns.Colors.reset .. "Type /ft for options." .. ns.Colors.reset)
+            ns:Print(ns.Colors.green .. "by Crutchie loaded successfully. " .. ns.Colors.reset .. "Type /ft for options.")
         else
             ns:Print(ns.Colors.red .. "Loaded with error." .. ns.Colors.reset)
         end
@@ -53,7 +53,7 @@ SlashCmdList["FARMTRACKER"] = function(msg)
     local cmd = string.lower(string.match(msg or "", "^%s*(%S*)") or "")
 
     if cmd == "" or cmd == "timer" or cmd == "t" then
-        local timerMod = ns.Modules["FarmTimer"]
+        local timerMod = ns.Modules["Tracker"]
         if timerMod and timerMod.ToggleUI then
             timerMod:ToggleUI()
         end
@@ -62,7 +62,7 @@ SlashCmdList["FARMTRACKER"] = function(msg)
 
     if cmd == "history" or cmd == "hist" or cmd == "log" then
         local histMod = ns.Modules["History"]
-        if histMod  and histMod.ToggleUI then
+        if histMod and histMod.ToggleUI then
             histMod:ToggleUI()
         end
         return
@@ -77,7 +77,7 @@ SlashCmdList["FARMTRACKER"] = function(msg)
     end
 
     if cmd == "testalert" then
-        local timerMod = ns.Modules["FarmTimer"]
+        local timerMod = ns.Modules["Tracker"]
         if timerMod and timerMod.TestDropAlert then
             timerMod:TestDropAlert()
         end
@@ -85,7 +85,7 @@ SlashCmdList["FARMTRACKER"] = function(msg)
     end
 
     if cmd == "debug" then
-        local timerMod = ns.Modules["FarmTimer"]
+        local timerMod = ns.Modules["Tracker"]
         if timerMod and timerMod.ToggleDebug then
             timerMod:ToggleDebug()
         end
@@ -96,5 +96,17 @@ SlashCmdList["FARMTRACKER"] = function(msg)
     print("  |cffffff00/ft|r (or |cffffff00/ft timer|r) - Toggle Farm Tracker window.")
     print("  |cffffff00/ft history|r - Open Session History log.")
     print("  |cffffff00/ft config|r - Open Settings menu.")
+    print("  |cffffff00/ft testalert|r - Preview the High-Value Drop Alert.")
     print("  |cffffff00/ft debug|r - Toggle loot/coin debug output.")
+end
+
+-- Key Bindings Labels
+BINDING_HEADER_FARMTRACKER          = "Farm Tracker"
+BINDING_NAME_FARMTRACKER_TOGGLE     = "Toggle Tracker Window"
+BINDING_NAME_FARMTRACKER_STARTPAUSE = "Start / Pause Timer"
+BINDING_NAME_FARMTRACKER_NEWRUN     = "Start New Dungeon Run"
+BINDING_NAME_FARMTRACKER_COMPACT    = "Toggle Compact Mode"
+
+function FarmTracker_GetTracker()
+    return ns.Modules["Tracker"]
 end

@@ -10,10 +10,13 @@
 
 # Core
 Core\Init.lua
+Core\Utils.lua
 Core\Core.lua
 
 # Modules
-Modules\FarmTimer.lua
+Modules\Pricing.lua
+Modules\LootWindow.lua
+Modules\Tracker.lua
 Modules\History.lua
 Modules\Options.lua
 Modules\MinimapButton.lua

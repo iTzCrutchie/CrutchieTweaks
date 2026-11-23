@@ -1,6 +1,7 @@
 local _, ns = ...
 
-local mod = ns:RegisterModule("FarmTimer", {})
+local mod = ns:RegisterModule("Tracker", {})
+ns.Tracker = mod
 
 local BASE_FONT_SIZE = 11
 local BASE_WIDTH     = 276
@@ -19,7 +20,6 @@ local state = {
     ahCopper       = 0,
     repairCopper   = 0,
     sessionXP      = 0,
-    mobsKilled     = 0,
     lastSaveTime   = nil,
     lootLog        = {},
     sessionIgnored = {},
@@ -27,76 +27,34 @@ local state = {
 }
 
 local OPENABLE_CONTAINERS = {
-    [5523]  = true, -- Small Barnacled Clam
-    [5524]  = true, -- Thick-shelled Clam
-    [7973]  = true, -- Big-mouth Clam
-    [15874] = true, -- Soft-shelled Clam
-    [24476] = true, -- Jaggal Clam
-    [36781] = true, -- Darkwater Clam
-    [45909] = true, -- Giant Darkwater Clam
-    [52340] = true, -- Abyssal Clam
+    [5523]  = true, [5524]  = true, [7973]  = true, [15874] = true,
+    [24476] = true, [36781] = true, [45909] = true, [52340] = true,
 }
 
-local QUALITY_FILTERS = {
-    { minQ = 0, label = "|cffccccccAll|r" },
-    { minQ = 1, label = "|cffffffffCommon+|r" },
-    { minQ = 2, label = "|cff1eff00Uncommon+|r" },
-    { minQ = 3, label = "|cff0070ddRare+|r" },
-    { minQ = 4, label = "|cffa335eeEpic+|r" },
-    { minQ = 5, label = "|cffff8000Legendary+|r" },
-}
-
-local debugMode         = false
-local uiFrame           = nil
-local lootFrame         = nil
-local lootRows          = {}
-local postMenu          = nil
-local lootContextMenu   = nil
-local alertFrame        = nil
-local pendingItems      = {}
-local wasInDungeon      = false
-local lastXP            = 0
-local lastXPMax         = 0
-local lastLevel         = 0
-local merchantOpen      = false
-local lastMoney         = 0
-local pendingRepairCost = 0
-local pendingRepairTime = 0
-local repairHooked      = false
+local debugMode             = false
+local uiFrame               = nil
+local postMenu              = nil
+local pendingItems          = {}
+local wasInDungeon          = false
+local autoPausedReason      = nil
+local lastXP                = 0
+local lastXPMax             = 0
+local lastLevel             = 0
+local lastMoney             = 0
+local lastRepairCost        = 0
+local pendingMoneySpent     = 0
+local pendingMoneyTime      = 0
+local pendingRepairDrop     = 0
+local pendingRepairDropTime = 0
 
 local function DebugPrint(msg)
     if debugMode then
-        ns:Print("|cffffaa00[TimerDebug]|r " .. tostring(msg))
+        ns:Print("|cffffaa00[TrackerDebug]|r " .. tostring(msg))
     end
 end
 
-local function SafeGetItemInfo(item)
-    if _G.C_Item and _G.C_Item.GetItemInfo then
-        return _G.C_Item.GetItemInfo(item)
-    elseif _G.GetItemInfo then
-        return _G.GetItemInfo(item)
-    end
-    return nil
-end
-
-local function HasTSM()
-    return (_G.TSM_API and _G.TSM_API.GetCustomPriceValue) ~= nil
-end
-
-local function HasAuctionator()
-    return (_G.Auctionator and _G.Auctionator.API and _G.Auctionator.API.v1) ~= nil
-end
-
-local function HasAnyAHAddon()
-    return HasTSM() or HasAuctionator()
-end
-
-local function IsItemBlocked(itemID)
-    if not itemID then return false end
-    local key = tostring(itemID)
-    if state.sessionIgnored and state.sessionIgnored[key] then return true end
-    if ns.db.globalBlacklist and ns.db.globalBlacklist[key] then return true end
-    return false
+function mod:GetState()
+    return state
 end
 
 local function InitSavedState()
@@ -127,194 +85,20 @@ local function InitSavedState()
     state.lastSaveTime = GetTime()
 end
 
-local function FormatMoneyUI(copper)
-    copper = math.floor(copper or 0)
-    local isNeg = copper < 0
-    local absC  = math.abs(copper)
-    local g = math.floor(absC / 10000)
-    local s = math.floor((absC % 10000) / 100)
-    local c = absC % 100
-    local sign = isNeg and "|cffff4444-|r" or ""
-
-    if g > 0 then
-        return string.format("%s|cffffd700%dg|r |cffc7c7cf%ds|r", sign, g, s)
-    elseif s > 0 then
-        return string.format("%s|cffc7c7cf%ds|r |cffeda55f%dc|r", sign, s, c)
-    else
-        return string.format("%s|cffeda55f%dc|r", sign, c)
-    end
-end
-
-local function FormatMoneyPlain(copper)
-    copper = math.floor(copper or 0)
-    local isNeg = copper < 0
-    local absC  = math.abs(copper)
-    local g = math.floor(absC / 10000)
-    local s = math.floor((absC % 10000) / 100)
-    local c = absC % 100
-    local sign = isNeg and "-" or ""
-
-    if g > 0 then
-        return string.format("%s%dg %ds", sign, g, s)
-    elseif s > 0 then
-        return string.format("%s%ds %dc", sign, s, c)
-    else
-        return string.format("%s%dc", sign, c)
-    end
-end
-
-local function FormatTime(sec)
-    if not sec then return "--:--" end
-    sec = math.floor(sec)
-    local hrs  = math.floor(sec / 3600)
-    local mins = math.floor((sec % 3600) / 60)
-    local secs = sec % 60
-    if hrs > 0 then
-        return string.format("%02d:%02d:%02d", hrs, mins, secs)
-    else
-        return string.format("%02d:%02d", mins, secs)
-    end
-end
-
-local function FormatTTL(sec)
-    if not sec or sec <= 0 then return "--:--" end
-    sec = math.floor(sec)
-    local hrs  = math.floor(sec / 3600)
-    local mins = math.floor((sec % 3600) / 60)
-    local secs = sec % 60
-    if hrs >= 100 then
-        return ">99h"
-    elseif hrs > 0 then
-        return string.format("%dh %02dm", hrs, mins)
-    elseif mins > 0 then
-        return string.format("%dm %02ds", mins, secs)
-    else
-        return string.format("%ds", secs)
-    end
-end
-
-local function IsMaxLevel()
-    return (UnitLevel("player") or 60) >= 60
-end
-
-local function FormatXP(xp)
-    xp = math.floor(xp or 0)
-    if xp >= 1000000 then
-        return string.format("%.2fM", xp / 1000000)
-    elseif xp >= 1000 then
-        return string.format("%.1fk", xp / 1000)
-    end
-    return tostring(xp)
-end
-
-local function GetFreeBagSlots()
-    local totalFree = 0
-    for bag = 0, 4 do
-        local free, bagType
-        if _G.C_Container and _G.C_Container.GetContainerNumFreeSlots then
-            free, bagType = _G.C_Container.GetContainerNumFreeSlots(bag)
-        elseif _G.GetContainerNumFreeSlots then
-            free, bagType = _G.GetContainerNumFreeSlots(bag)
-        end
-        if free and (bagType == nil or bagType == 0) then
-            totalFree = totalFree + free
-        end
-    end
-    return totalFree
-end
-
-local function ParseLootedCoin(msg)
-    if not msg then return 0 end
-    if not (string.find(msg, "You loot", 1, true) or string.find(msg, "Your share of the loot", 1, true)) then
-        return 0
-    end
-
-    local gold   = tonumber(string.match(msg, "(%d+)%s+Gold")) or 0
-    local silver = tonumber(string.match(msg, "(%d+)%s+Silver")) or 0
-    local copper = tonumber(string.match(msg, "(%d+)%s+Copper")) or 0
-
-    return (gold * 10000) + (silver * 100) + copper
-end
-
-local function QueryTSM(priceKey, tsmItemString)
-    if not (HasTSM() and tsmItemString) then return 0 end
-    local ok, val = pcall(_G.TSM_API.GetCustomPriceValue, priceKey, tsmItemString)
-    if ok and type(val) == "number" and val > 0 then
-        return val
-    end
-    return 0
-end
-
-local function QueryAuctionator(itemID, cleanLink)
-    if not HasAuctionator() then return 0 end
-    local api = _G.Auctionator.API.v1
-    if itemID and api.GetAuctionPriceByItemID then
-        local ok, val = pcall(api.GetAuctionPriceByItemID, "FarmTracker", itemID)
-        if ok and type(val) == "number" and val > 0 then return val end
-    end
-    if cleanLink and api.GetAuctionPriceByItemLink then
-        local ok, val = pcall(api.GetAuctionPriceByItemLink, "FarmTracker", cleanLink)
-        if ok and type(val) == "number" and val > 0 then return val end
-    end
-    return 0
-end
-
-local function GetItemAHValue(itemID, cleanLink, vendorUnitPrice, isBoP)
-    local vendor = vendorUnitPrice or 0
-    if isBoP or not HasAnyAHAddon() then
-        return vendor
-    end
-
-    local source = ns.db.ahPriceSource or "AUTO"
-    if source == "VENDOR" then
-        return vendor
-    end
-
-    local ahUnit = 0
-    local tsmItemString = itemID and ("i:" .. itemID) or nil
-
-    if source == "TSM_MIN" then
-        ahUnit = QueryTSM("DBMinBuyout", tsmItemString)
-    elseif source == "TSM_MARKET" then
-        ahUnit = QueryTSM("DBMarket", tsmItemString)
-    elseif source == "TSM_HIST" then
-        ahUnit = QueryTSM("DBHistorical", tsmItemString)
-    elseif source == "AUCTIONATOR" then
-        ahUnit = QueryAuctionator(itemID, cleanLink)
-    else
-        ahUnit = QueryTSM("DBMinBuyout", tsmItemString)
-        if ahUnit == 0 then ahUnit = QueryTSM("DBMarket", tsmItemString) end
-        if ahUnit == 0 then ahUnit = QueryAuctionator(itemID, cleanLink) end
-    end
-
-    if ahUnit < vendor then ahUnit = vendor end
-    return ahUnit
-end
-
 local function IsDungeonMode()
     if ns.db.timerDungeonMode == nil then ns.db.timerDungeonMode = true end
     return ns.db.timerDungeonMode
 end
 
-local function IsVendorOnlyMode()
-    if not HasAnyAHAddon() or ns.db.ahPriceSource == "VENDOR" then
-        return true
-    end
-    return ns.db.timerVendorOnly == true
-end
-
-local function IsLootPanelOpen()
-    return ns.db.timerLootOpen == true
-end
-
 local function RecalculateLootTotals()
+    local Pricing     = ns.Pricing
     local totalVendor = 0
     local totalAH     = 0
 
     for key, entry in pairs(state.lootLog) do
-        if not IsItemBlocked(entry.itemID or key) then
+        if not Pricing.IsItemBlocked(entry.itemID or key, state.sessionIgnored) then
             local unitVendor = entry.vendorUnit or 0
-            local unitAH     = GetItemAHValue(entry.itemID, entry.link, unitVendor, entry.isBoP)
+            local unitAH     = Pricing.GetItemAHValue(entry.itemID, entry.link, unitVendor, entry.isBoP)
             entry.ahUnit     = unitAH
             local count      = entry.count or 1
             totalVendor      = totalVendor + (unitVendor * count)
@@ -352,49 +136,23 @@ local function StartNextRun()
     state.runTime = 0
 end
 
-local function ApplyBackdropTheme(frame, isTab)
-    if not frame or not frame.SetBackdrop then return end
-    if ns.db.timerTheme == "classic" then
-        frame:SetBackdrop({
-            bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile     = true,
-            tileSize = 32,
-            edgeSize = isTab and 12 or 16,
-            insets   = { left = 4, right = 4, top = 4, bottom = 4 },
-        })
-        frame:SetBackdropColor(1, 1, 1, 0.95)
-        frame:SetBackdropBorderColor(0.85, 0.75, 0.55, 1)
-    else
-        frame:SetBackdrop({
-            bgFile   = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            tile     = false,
-            edgeSize = 1,
-        })
-        frame:SetBackdropColor(0.06, 0.06, 0.08, 0.92)
-        frame:SetBackdropBorderColor(0.2, 0.2, 0.25, 1)
-    end
-end
-
 local function ApplyTheme()
-    ApplyBackdropTheme(uiFrame, false)
-    ApplyBackdropTheme(lootFrame, false)
-    ApplyBackdropTheme(uiFrame and uiFrame.lootToggleBtn, true)
-    ApplyBackdropTheme(postMenu, false)
-    ApplyBackdropTheme(lootContextMenu, false)
+    local Utils = ns.Utils
+    Utils.ApplyBackdropTheme(uiFrame, false, true)
+    Utils.ApplyBackdropTheme(uiFrame and uiFrame.lootToggleBtn, true, true)
+    Utils.ApplyBackdropTheme(postMenu, false, false)
+    if ns.LootWindow then ns.LootWindow:ApplyTheme() end
 end
 
 local function ApplyLockState()
     if not uiFrame then return end
-    local locked = (ns.db.timerLocked == true)
+    local locked    = (ns.db.timerLocked == true)
+    local clickThru = locked and (ns.db.compactMode == true) and (ns.db.compactClickThru == true)
+
+    uiFrame:EnableMouse(not clickThru)
 
     if uiFrame.resizeBtn then
-        if locked then
-            uiFrame.resizeBtn:Hide()
-        else
-            uiFrame.resizeBtn:Show()
-        end
+        if locked then uiFrame.resizeBtn:Hide() else uiFrame.resizeBtn:Show() end
     end
 
     if uiFrame.lockBtn then
@@ -408,25 +166,13 @@ local function ApplyLockState()
     end
 end
 
-local function GetSelectedFontPath()
-    local selected = ns.db.timerFont or "Friz Quadrata"
-    if ns.GetAvailableFonts then
-        for _, fInfo in ipairs(ns.GetAvailableFonts()) do
-            if fInfo.name == selected then
-                return fInfo.path
-            end
-        end
-    end
-    return STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
-end
-
 local function ApplyFontSize()
     if not uiFrame then return end
 
     local targetPx = tonumber(ns.db.timerFontSize) or BASE_FONT_SIZE
     if targetPx < 8 then targetPx = 8 elseif targetPx > 64 then targetPx = 64 end
 
-    local fontPath = GetSelectedFontPath()
+    local fontPath = ns.Utils.GetSelectedFontPath()
 
     uiFrame.title:SetFont(fontPath, 13, "OUTLINE")
     uiFrame.sessionTimerText:SetFont(fontPath, 16, "OUTLINE")
@@ -442,13 +188,7 @@ local function ApplyFontSize()
         row.val:SetFont(fontPath, 11, "")
     end
 
-    if lootFrame then
-        lootFrame.header:SetFont(fontPath, 13, "OUTLINE")
-        for _, lRow in ipairs(lootRows) do
-            lRow.nameText:SetFont(fontPath, 11, "")
-            lRow.valText:SetFont(fontPath, 11, "")
-        end
-    end
+    if ns.LootWindow then ns.LootWindow:ApplyFont(fontPath) end
 
     local newScale = targetPx / BASE_FONT_SIZE
     local oldScale = uiFrame:GetScale() or 1
@@ -470,237 +210,12 @@ local function ApplyFontSize()
     end
 end
 
-local UpdateDisplay
-local UpdateLootList
-
-local function ShowLootContextMenu(itemID, itemName, anchorFrame)
-    if not lootContextMenu then
-        local m = CreateFrame("Frame", "FarmTrackerLootContextMenu", UIParent, "BackdropTemplate")
-        m:SetSize(166, 98)
-        m:SetFrameStrata("TOOLTIP")
-        m:SetClampedToScreen(true)
-        ApplyBackdropTheme(m, false)
-
-        local hdr = m:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        hdr:SetPoint("TOPLEFT", 8, -7)
-        hdr:SetPoint("TOPRIGHT", -8, -7)
-        hdr:SetJustifyH("CENTER")
-        hdr:SetWordWrap(false)
-        m.hdr = hdr
-
-        local sessBtn = CreateFrame("Button", nil, m, "UIPanelButtonTemplate")
-        sessBtn:SetSize(148, 20)
-        sessBtn:SetPoint("TOP", 0, -24)
-        sessBtn:SetNormalFontObject("GameFontHighlightSmall")
-        sessBtn:SetText("Ignore This Session")
-        m.sessBtn = sessBtn
-
-        local globBtn = CreateFrame("Button", nil, m, "UIPanelButtonTemplate")
-        globBtn:SetSize(148, 20)
-        globBtn:SetPoint("TOP", 0, -47)
-        globBtn:SetNormalFontObject("GameFontHighlightSmall")
-        globBtn:SetText("|cffffaa00Add to Global Blocklist|r")
-        m.globBtn = globBtn
-
-        local cancelBtn = CreateFrame("Button", nil, m, "UIPanelButtonTemplate")
-        cancelBtn:SetSize(148, 20)
-        cancelBtn:SetPoint("TOP", 0, -70)
-        cancelBtn:SetNormalFontObject("GameFontHighlightSmall")
-        cancelBtn:SetText("|cffff6666Cancel|r")
-        cancelBtn:SetScript("OnClick", function() m:Hide() end)
-
-        m:Hide()
-        lootContextMenu = m
-    end
-
-    ApplyBackdropTheme(lootContextMenu, false)
-    lootContextMenu.hdr:SetText("|cff00ccff" .. (itemName or ("Item #" .. tostring(itemID))) .. "|r")
-
-    lootContextMenu.sessBtn:SetScript("OnClick", function()
-        state.sessionIgnored[tostring(itemID)] = true
-        lootContextMenu:Hide()
-        RecalculateLootTotals()
-        UpdateDisplay()
-        UpdateLootList()
-    end)
-
-    lootContextMenu.globBtn:SetScript("OnClick", function()
-        ns.db.globalBlacklist[tostring(itemID)] = itemName or tostring(itemID)
-        lootContextMenu:Hide()
-        RecalculateLootTotals()
-        UpdateDisplay()
-        UpdateLootList()
-        local optMod = ns.Modules["Options"]
-        if optMod and optMod.SyncBlacklistCount then optMod:SyncBlacklistCount() end
-        ns:Print("Added |cffffaa00" .. (itemName or ("Item #" .. tostring(itemID))) .. "|r to Global Blocklist.")
-    end)
-
-    lootContextMenu:ClearAllPoints()
-    lootContextMenu:SetPoint("TOPLEFT", anchorFrame, "TOPRIGHT", 4, 0)
-    lootContextMenu:Show()
-end
-
-UpdateLootList = function()
-    if not lootFrame or not lootFrame:IsShown() then return end
-
-    local useVendor = IsVendorOnlyMode()
-    local minQual   = ns.db.timerLootMinQual or 0
-    local sorted    = {}
-    local totalItemCount = 0
-
-    for _, entry in pairs(state.lootLog) do
-        if not IsItemBlocked(entry.itemID) then
-            if entry.quality == nil and entry.itemID then
-                local _, _, fetchedQuality = SafeGetItemInfo(entry.itemID)
-                if fetchedQuality then
-                    entry.quality = fetchedQuality
-                end
-            end
-
-            local q = entry.quality or 1
-            if q >= minQual then
-                local unitVal = useVendor and (entry.vendorUnit or 0) or (entry.ahUnit or 0)
-                local rowVal  = unitVal * (entry.count or 1)
-                totalItemCount = totalItemCount + (entry.count or 1)
-                table.insert(sorted, {
-                    entry    = entry,
-                    totalVal = rowVal,
-                })
-            end
-        end
-    end
-
-    table.sort(sorted, function(a, b)
-        if a.totalVal ~= b.totalVal then
-            return a.totalVal > b.totalVal
-        end
-        return (a.entry.name or "") < (b.entry.name or "")
-    end)
-
-    lootFrame.header:SetText(string.format("|cff00ccffLoot|r |cffaaaaaa(%d)|r", totalItemCount))
-
-    for _, qf in ipairs(QUALITY_FILTERS) do
-        if qf.minQ == minQual then
-            lootFrame.filterBtn:SetText(qf.label)
-            break
-        end
-    end
-
-    if #sorted == 0 then
-        lootFrame.emptyText:Show()
-    else
-        lootFrame.emptyText:Hide()
-    end
-
-    local fontPath = GetSelectedFontPath()
-    local rowHeight = 20
-    for i, itemData in ipairs(sorted) do
-        local row = lootRows[i]
-        if not row then
-            row = CreateFrame("Button", nil, lootFrame.scrollChild)
-            row:SetHeight(rowHeight)
-            row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-
-            local bg = row:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            bg:SetColorTexture(1, 1, 1, (i % 2 == 0) and 0.03 or 0.0)
-            row.bg = bg
-
-            local hl = row:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(0.2, 0.5, 0.8, 0.2)
-
-            local icon = row:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(16, 16)
-            icon:SetPoint("LEFT", 2, 0)
-            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            row.icon = icon
-
-            local valText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            valText:SetPoint("RIGHT", -4, 0)
-            valText:SetJustifyH("RIGHT")
-            row.valText = valText
-
-            local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            nameText:SetPoint("LEFT", icon, "RIGHT", 5, 0)
-            nameText:SetPoint("RIGHT", valText, "LEFT", -6, 0)
-            nameText:SetJustifyH("LEFT")
-            nameText:SetWordWrap(false)
-            row.nameText = nameText
-
-            row:SetScript("OnClick", function(self, btn)
-                if btn == "RightButton" and self.itemID then
-                    ShowLootContextMenu(self.itemID, self.itemName, self)
-                end
-            end)
-
-            row:SetScript("OnEnter", function(self)
-                if self.itemID then
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    if self.itemLink then
-                        GameTooltip:SetHyperlink(self.itemLink)
-                    else
-                        GameTooltip:SetHyperlink("item:" .. self.itemID)
-                    end
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine("|cffaaaaaaRight-Click to ignore or blacklist|r")
-                    GameTooltip:Show()
-                end
-            end)
-            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-            lootRows[i] = row
-        end
-
-        local e = itemData.entry
-        row.itemID   = e.itemID
-        row.itemLink = e.link
-        row.itemName = e.name
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", lootFrame.scrollChild, "TOPLEFT", 0, -((i - 1) * rowHeight))
-        row:SetPoint("TOPRIGHT", lootFrame.scrollChild, "TOPRIGHT", 0, -((i - 1) * rowHeight))
-
-        row.icon:SetTexture(e.icon or 134400)
-        row.nameText:SetFont(fontPath, 11, "")
-        row.valText:SetFont(fontPath, 11, "")
-
-        local displayLabel = e.link or e.name or ("Item #" .. tostring(e.itemID))
-        if (e.count or 1) > 1 then
-            displayLabel = displayLabel .. " |cffaaaaaax" .. e.count .. "|r"
-        end
-        row.nameText:SetText(displayLabel)
-        row.valText:SetText(FormatMoneyUI(itemData.totalVal))
-        row:Show()
-    end
-
-    for i = #sorted + 1, #lootRows do
-        lootRows[i]:Hide()
-    end
-
-    lootFrame.scrollChild:SetHeight(math.max(#sorted * rowHeight, 1))
-end
-
-local function UpdateLootPanelVisibility()
-    if not uiFrame or not lootFrame then return end
-
-    if IsLootPanelOpen() and uiFrame:IsShown() and not ns.db.compactMode then
-        lootFrame:SetHeight(uiFrame:GetHeight())
-        lootFrame:Show()
-        uiFrame.lootToggleBtn:SetText("<")
-        UpdateLootList()
-    else
-        lootFrame:Hide()
-        if lootContextMenu then lootContextMenu:Hide() end
-        uiFrame.lootToggleBtn:SetText(">")
-    end
-end
-
 local function ApplyLayoutMode()
     if not uiFrame then return end
 
     local compact     = (ns.db.compactMode == true)
     local dungeonMode = IsDungeonMode()
-    local maxLvl      = IsMaxLevel()
+    local maxLvl      = ns.Utils.IsMaxLevel()
 
     uiFrame.dungeonCheck:SetChecked(dungeonMode)
     if uiFrame.compactBtn then
@@ -735,7 +250,6 @@ local function ApplyLayoutMode()
         return
     end
 
-    -- Full Mode
     uiFrame.compactText:Hide()
     uiFrame.dungeonCheck:Show()
     uiFrame.dungeonCheckLbl:Show()
@@ -763,7 +277,6 @@ local function ApplyLayoutMode()
         uiFrame.runLabel:Show()
         uiFrame.runTimerText:Show()
         uiFrame.lapBtn:Show()
-
         y = -88
     else
         uiFrame.sessionLabel:ClearAllPoints()
@@ -775,7 +288,6 @@ local function ApplyLayoutMode()
         uiFrame.runLabel:Hide()
         uiFrame.runTimerText:Hide()
         uiFrame.lapBtn:Hide()
-
         y = -72
     end
 
@@ -806,7 +318,7 @@ local function ApplyLayoutMode()
 
     PlaceRow(uiFrame.rows.raw,     true)
     PlaceRow(uiFrame.rows.vendor,  true)
-    PlaceRow(uiFrame.rows.ah,      HasAnyAHAddon())
+    PlaceRow(uiFrame.rows.ah,      ns.Pricing.HasAnyAHAddon())
     PlaceRow(uiFrame.rows.repairs, ns.db.showRepairCosts ~= false)
 
     y = y - 2
@@ -838,15 +350,15 @@ local function ApplyLayoutMode()
 
     local totalHeight = math.abs(y) + 40
     uiFrame:SetHeight(totalHeight)
-    if lootFrame then
-        lootFrame:SetHeight(totalHeight)
-    end
+    if ns.LootWindow then ns.LootWindow:SetHeight(totalHeight) end
 end
 
-UpdateDisplay = function()
+local function UpdateDisplay()
     if not uiFrame or not uiFrame:IsShown() then return end
 
-    local useVendor    = IsVendorOnlyMode()
+    local Utils        = ns.Utils
+    local Pricing      = ns.Pricing
+    local useVendor    = Pricing.IsVendorOnlyMode()
     local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
     local repairCopper = state.repairCopper or 0
     local netCopper    = (state.rawCopper + itemTotal) - repairCopper
@@ -861,14 +373,14 @@ UpdateDisplay = function()
         xph       = (state.sessionXP or 0) / sessionHours
     end
 
-    uiFrame.sessionTimerText:SetText(FormatTime(state.sessionTime))
-    uiFrame.runTimerText:SetText(FormatTime(state.runTime))
+    uiFrame.sessionTimerText:SetText(Utils.FormatTime(state.sessionTime))
+    uiFrame.runTimerText:SetText(Utils.FormatTime(state.runTime))
     uiFrame.runLabel:SetText(string.format("|cff00ccffRun #%d|r", state.runCount))
 
     uiFrame.rows.totalRuns.val:SetText(tostring(state.completedRuns))
     uiFrame.rows.rph.val:SetText(string.format("%.1f/hr", rph))
-    uiFrame.rows.lastRun.val:SetText(FormatTime(state.lastRunTime))
-    uiFrame.rows.fastRun.val:SetText(state.fastestRunTime and ("|cff00ff00" .. FormatTime(state.fastestRunTime) .. "|r") or "--:--")
+    uiFrame.rows.lastRun.val:SetText(Utils.FormatTime(state.lastRunTime))
+    uiFrame.rows.fastRun.val:SetText(state.fastestRunTime and ("|cff00ff00" .. Utils.FormatTime(state.fastestRunTime) .. "|r") or "--:--")
 
     local hourlyRuns = GetHourlyRunCount()
     if hourlyRuns >= 5 then
@@ -879,12 +391,12 @@ UpdateDisplay = function()
         uiFrame.rows.lockout.val:SetText("|cff00ff00Safe (" .. hourlyRuns .. "/5)|r")
     end
 
-    uiFrame.rows.raw.val:SetText(FormatMoneyUI(state.rawCopper))
-    uiFrame.rows.vendor.val:SetText(FormatMoneyUI(state.vendorCopper))
-    uiFrame.rows.ah.val:SetText(FormatMoneyUI(state.ahCopper))
-    uiFrame.rows.repairs.val:SetText(repairCopper > 0 and ("|cffff5555-|r" .. FormatMoneyUI(repairCopper)) or "0c")
+    uiFrame.rows.raw.val:SetText(Utils.FormatMoneyUI(state.rawCopper))
+    uiFrame.rows.vendor.val:SetText(Utils.FormatMoneyUI(state.vendorCopper))
+    uiFrame.rows.ah.val:SetText(Utils.FormatMoneyUI(state.ahCopper))
+    uiFrame.rows.repairs.val:SetText(repairCopper > 0 and ("|cffff5555-|r" .. Utils.FormatMoneyUI(repairCopper)) or "0c")
 
-    if not HasAnyAHAddon() then
+    if not Pricing.HasAnyAHAddon() then
         uiFrame.valModeBtn:SetText("|cffaaaaaaVendor + Raw|r")
     elseif useVendor then
         uiFrame.valModeBtn:SetText("|cffffd700Vendor + Raw|r")
@@ -892,20 +404,19 @@ UpdateDisplay = function()
         uiFrame.valModeBtn:SetText("|cff00ccffAH + Raw|r")
     end
 
-    uiFrame.rows.total.val:SetText(FormatMoneyUI(netCopper))
-    uiFrame.rows.gph.val:SetText(FormatMoneyUI(gphCopper) .. "/hr")
-    uiFrame.rows.xph.val:SetText("|cffc080ff" .. FormatXP(xph) .. "/hr|r")
+    uiFrame.rows.total.val:SetText(Utils.FormatMoneyUI(netCopper))
+    uiFrame.rows.gph.val:SetText(Utils.FormatMoneyUI(gphCopper) .. "/hr")
+    uiFrame.rows.xph.val:SetText("|cffc080ff" .. Utils.FormatXP(xph) .. "/hr|r")
 
-    if xph > 0 and not IsMaxLevel() then
+    if xph > 0 and not Utils.IsMaxLevel() then
         local remXP = (UnitXPMax("player") or 0) - (UnitXP("player") or 0)
         local ttlSec = (remXP / xph) * 3600
-        uiFrame.rows.ttl.val:SetText("|cffc080ff" .. FormatTTL(ttlSec) .. "|r")
+        uiFrame.rows.ttl.val:SetText("|cffc080ff" .. Utils.FormatTTL(ttlSec) .. "|r")
     else
         uiFrame.rows.ttl.val:SetText("|cffaaaaaa--:--|r")
     end
 
-    -- Free Bag Slots (orange <= 5, red == 0)
-    local freeSlots = GetFreeBagSlots()
+    local freeSlots = Utils.GetFreeBagSlots()
     if freeSlots == 0 then
         uiFrame.rows.bags.val:SetText("|cffff33330 (FULL!)|r")
     elseif freeSlots <= 5 then
@@ -914,7 +425,6 @@ UpdateDisplay = function()
         uiFrame.rows.bags.val:SetText("|cff00ff00" .. freeSlots .. " Free|r")
     end
 
-    -- Session Gold Goal Progress Bar
     local goalCopper = tonumber(ns.db.sessionGoalCopper) or 1000000
     if goalCopper > 0 then
         local pct = math.max(0, (netCopper / goalCopper) * 100)
@@ -924,15 +434,14 @@ UpdateDisplay = function()
         else
             uiFrame.goalBar:SetStatusBarColor(0.0, 0.72, 0.95, 0.9)
         end
-        uiFrame.goalBar.text:SetText(string.format("Goal: %s / %s (%.0f%%)", FormatMoneyPlain(math.max(0, netCopper)), FormatMoneyPlain(goalCopper), pct))
+        uiFrame.goalBar.text:SetText(string.format("Goal: %s / %s (%.0f%%)", Utils.FormatMoneyPlain(math.max(0, netCopper)), Utils.FormatMoneyPlain(goalCopper), pct))
     else
         uiFrame.goalBar:SetValue(0)
         uiFrame.goalBar.text:SetText("Goal: Not Set")
     end
 
-    -- Compact Mode Single-Line Summary
     local statusDot = state.isRunning and "|cff00ff00*|r " or "|cffffaa00|| |r"
-    uiFrame.compactText:SetText(statusDot .. FormatTime(state.sessionTime) .. "  |cff555555/|r  " .. FormatMoneyUI(gphCopper) .. "/hr")
+    uiFrame.compactText:SetText(statusDot .. Utils.FormatTime(state.sessionTime) .. "  |cff555555/|r  " .. Utils.FormatMoneyUI(gphCopper) .. "/hr")
 
     if state.isRunning then
         uiFrame.startBtn:SetText("|cffffaa00Pause|r")
@@ -941,96 +450,12 @@ UpdateDisplay = function()
     end
 end
 
-local function ShowDropAlert(itemLink, itemName, itemTexture, dropVal, count)
-    if not alertFrame then
-        local af = CreateFrame("Frame", "FarmTrackerDropAlertFrame", UIParent, "BackdropTemplate")
-        af:SetSize(320, 56)
-        af:SetPoint("TOP", UIParent, "TOP", 0, -140)
-        af:SetFrameStrata("HIGH")
-        af:EnableMouse(false)
-        af:SetBackdrop({
-            bgFile   = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            tile     = false,
-            edgeSize = 2,
-        })
-        af:SetBackdropColor(0.06, 0.06, 0.08, 0.92)
-        af:SetBackdropBorderColor(1, 0.82, 0.15, 1)
-
-        local flash = af:CreateTexture(nil, "OVERLAY")
-        flash:SetAllPoints()
-        flash:SetColorTexture(1, 0.85, 0.2, 0.55)
-        af.flash = flash
-
-        local icon = af:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(36, 36)
-        icon:SetPoint("LEFT", 10, 0)
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        af.icon = icon
-
-        local hdr = af:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        hdr:SetPoint("TOPLEFT", icon, "TOPRIGHT", 10, -2)
-        hdr:SetPoint("RIGHT", -10, 0)
-        hdr:SetJustifyH("LEFT")
-        hdr:SetText("|cffffd700HIGH-VALUE DROP!|r")
-        af.hdr = hdr
-
-        local sub = af:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        sub:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 10, 2)
-        sub:SetPoint("RIGHT", -10, 0)
-        sub:SetJustifyH("LEFT")
-        sub:SetWordWrap(false)
-        af.sub = sub
-
-        af:Hide()
-        alertFrame = af
-    end
-
-    local fontPath = GetSelectedFontPath()
-    alertFrame.hdr:SetFont(fontPath, 12, "OUTLINE")
-    alertFrame.sub:SetFont(fontPath, 12, "OUTLINE")
-
-    alertFrame.icon:SetTexture(itemTexture or 134400)
-    local label = itemLink or itemName or "Unknown Item"
-    if (count or 1) > 1 then
-        label = label .. " |cffaaaaaax" .. count .. "|r"
-    end
-    alertFrame.sub:SetText(label .. "  (" .. FormatMoneyUI(dropVal) .. ")")
-
-    pcall(PlaySound, SOUNDKIT and SOUNDKIT.LOOT_WINDOW_COIN_SOUND or 120, "SFX")
-
-    local elapsed = 0
-    alertFrame:SetAlpha(0)
-    alertFrame.flash:SetAlpha(0.55)
-    alertFrame:Show()
-
-    alertFrame:SetScript("OnUpdate", function(self, dt)
-        elapsed = elapsed + dt
-
-        if elapsed <= 0.6 then
-            self.flash:SetAlpha(0.55 * (1 - (elapsed / 0.6)))
-        else
-            self.flash:SetAlpha(0)
-        end
-
-        if elapsed < 0.2 then
-            self:SetAlpha(elapsed / 0.2)
-        elseif elapsed < 3.2 then
-            self:SetAlpha(1)
-        elseif elapsed < 4.0 then
-            self:SetAlpha(1 - ((elapsed - 3.2) / 0.8))
-        else
-            self:SetAlpha(0)
-            self:SetScript("OnUpdate", nil)
-            self:Hide()
-        end
-    end)
-end
-
 local function ProcessLootedItem(itemID, count, retryIfUncached)
     if not itemID or OPENABLE_CONTAINERS[itemID] then return end
 
-    local itemName, cleanLink, itemQuality, _, _, _, _, _, _, itemTexture, sellPrice, _, _, bindType = SafeGetItemInfo(itemID)
+    local Utils   = ns.Utils
+    local Pricing = ns.Pricing
+    local itemName, cleanLink, itemQuality, _, _, _, _, _, _, itemTexture, sellPrice, _, _, bindType = Utils.SafeGetItemInfo(itemID)
 
     if not itemName and retryIfUncached then
         DebugPrint("Item uncached, queuing ID: " .. tostring(itemID))
@@ -1041,7 +466,7 @@ local function ProcessLootedItem(itemID, count, retryIfUncached)
     sellPrice = tonumber(sellPrice) or 0
     local isBoP = (bindType == 1)
 
-    local unitAH = GetItemAHValue(itemID, cleanLink, sellPrice, isBoP)
+    local unitAH = Pricing.GetItemAHValue(itemID, cleanLink, sellPrice, isBoP)
     local itemVendorTotal = sellPrice * count
     local itemAHTotal     = unitAH * count
 
@@ -1068,24 +493,26 @@ local function ProcessLootedItem(itemID, count, retryIfUncached)
         }
     end
 
-    if not IsItemBlocked(itemID) then
+    if not Pricing.IsItemBlocked(itemID, state.sessionIgnored) then
         state.vendorCopper = state.vendorCopper + itemVendorTotal
         state.ahCopper     = state.ahCopper + itemAHTotal
 
         if ns.db.dropAlertEnabled then
             local threshold = tonumber(ns.db.dropAlertThreshold) or 20000
-            local dropVal   = IsVendorOnlyMode() and itemVendorTotal or itemAHTotal
+            local dropVal   = Pricing.IsVendorOnlyMode() and itemVendorTotal or itemAHTotal
             if dropVal >= threshold then
-                ShowDropAlert(cleanLink, itemName, itemTexture, dropVal, count)
+                if ns.LootWindow then
+                    ns.LootWindow:ShowDropAlert(cleanLink, itemName, itemTexture, dropVal, count)
+                end
                 local label = cleanLink or itemName or ("Item #" .. key)
                 if count > 1 then label = label .. " x" .. count end
-                ns:Print("|cffffd700High-Value Drop:|r " .. label .. " (" .. FormatMoneyUI(dropVal) .. ")")
+                ns:Print("|cffffd700High-Value Drop:|r " .. label .. " (" .. Utils.FormatMoneyUI(dropVal) .. ")")
             end
         end
     end
 
     UpdateDisplay()
-    UpdateLootList()
+    if ns.LootWindow then ns.LootWindow:UpdateList() end
 end
 
 local function SaveCurrentSessionToHistory()
@@ -1093,7 +520,7 @@ local function SaveCurrentSessionToHistory()
     local histMod = ns.Modules["History"]
     if not (histMod and histMod.SaveSession) then return end
 
-    local useVendor    = IsVendorOnlyMode()
+    local useVendor    = ns.Pricing.IsVendorOnlyMode()
     local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
     local repairCopper = state.repairCopper or 0
     local netCopper    = (state.rawCopper + itemTotal) - repairCopper
@@ -1116,21 +543,12 @@ local function SaveCurrentSessionToHistory()
         gphCopper    = gphCopper,
         modeTag      = useVendor and "Vendor" or "AH",
         sessionXP    = state.sessionXP or 0,
-        mobsKilled   = state.mobsKilled or 0,
     })
 end
 
-local function SendSummaryToChannel(chatType)
-    if chatType == "PARTY" and not IsInGroup() then
-        ns:Print(ns.Colors.red .. "You are not currently in a party." .. ns.Colors.reset)
-        return
-    end
-    if chatType == "GUILD" and not IsInGuild() then
-        ns:Print(ns.Colors.red .. "You are not currently in a guild." .. ns.Colors.reset)
-        return
-    end
-
-    local useVendor    = IsVendorOnlyMode()
+local function BuildSummaryString()
+    local Utils        = ns.Utils
+    local useVendor    = ns.Pricing.IsVendorOnlyMode()
     local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
     local modeTag      = useVendor and "Vendor" or "AH"
     local repairCopper = state.repairCopper or 0
@@ -1142,37 +560,47 @@ local function SendSummaryToChannel(chatType)
 
     local runInfo = ""
     if IsDungeonMode() then
-        local lastStr = state.lastRunTime and (", Last: " .. FormatTime(state.lastRunTime)) or ""
-        local fastStr = state.fastestRunTime and (", Best: " .. FormatTime(state.fastestRunTime)) or ""
+        local lastStr = state.lastRunTime and (", Last: " .. Utils.FormatTime(state.lastRunTime)) or ""
+        local fastStr = state.fastestRunTime and (", Best: " .. Utils.FormatTime(state.fastestRunTime)) or ""
         runInfo = string.format(" [Runs: %d (%.1f/hr)%s%s]", state.completedRuns, rph, lastStr, fastStr)
     end
 
-    local repairInfo = (repairCopper > 0) and (" // Repairs: -" .. FormatMoneyPlain(repairCopper)) or ""
+    local repairInfo = (repairCopper > 0) and (" // Repairs: -" .. Utils.FormatMoneyPlain(repairCopper)) or ""
 
-    local msg = string.format(
+    return string.format(
         "[Farm Tracker] %s - Session: %s%s // Net (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s%s",
         zoneName,
-        FormatTime(state.sessionTime),
+        Utils.FormatTime(state.sessionTime),
         runInfo,
         modeTag,
-        FormatMoneyPlain(netCopper),
-        FormatMoneyPlain(gphCopper),
-        FormatMoneyPlain(state.rawCopper),
-        FormatMoneyPlain(state.vendorCopper),
-        FormatMoneyPlain(state.ahCopper),
+        Utils.FormatMoneyPlain(netCopper),
+        Utils.FormatMoneyPlain(gphCopper),
+        Utils.FormatMoneyPlain(state.rawCopper),
+        Utils.FormatMoneyPlain(state.vendorCopper),
+        Utils.FormatMoneyPlain(state.ahCopper),
         repairInfo
     )
+end
 
-    SendChatMessage(msg, chatType)
+local function SendSummaryToChannel(chatType)
+    if chatType == "PARTY" and not IsInGroup() then
+        ns:Print(ns.Colors.red .. "You are not currently in a party." .. ns.Colors.reset)
+        return
+    end
+    if chatType == "GUILD" and not IsInGuild() then
+        ns:Print(ns.Colors.red .. "You are not currently in a guild." .. ns.Colors.reset)
+        return
+    end
+    SendChatMessage(BuildSummaryString(), chatType)
 end
 
 local function TogglePostMenu(anchorBtn)
     if not postMenu then
         local m = CreateFrame("Frame", "FarmTrackerPostMenu", UIParent, "BackdropTemplate")
-        m:SetSize(130, 122)
+        m:SetSize(134, 145)
         m:SetFrameStrata("DIALOG")
         m:SetClampedToScreen(true)
-        ApplyBackdropTheme(m, false)
+        ns.Utils.ApplyBackdropTheme(m, false, false)
 
         local header = m:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         header:SetPoint("TOP", 0, -7)
@@ -1180,7 +608,7 @@ local function TogglePostMenu(anchorBtn)
 
         local function MakeChannelBtn(label, yOffset, onClick)
             local b = CreateFrame("Button", nil, m, "UIPanelButtonTemplate")
-            b:SetSize(110, 20)
+            b:SetSize(114, 20)
             b:SetPoint("TOP", 0, yOffset)
             b:SetText(label)
             b:SetScript("OnClick", function()
@@ -1193,7 +621,10 @@ local function TogglePostMenu(anchorBtn)
         MakeChannelBtn("Say (/s)", -24, function() SendSummaryToChannel("SAY") end)
         MakeChannelBtn("|cffaaaaffParty (/p)|r", -47, function() SendSummaryToChannel("PARTY") end)
         MakeChannelBtn("|cff40ff40Guild (/g)|r", -70, function() SendSummaryToChannel("GUILD") end)
-        MakeChannelBtn("|cffff6666Cancel|r", -95, nil)
+        MakeChannelBtn("|cffffd700Copy (Ctrl+C)|r", -93, function()
+            ns.Utils.ShowCopyPopup(BuildSummaryString(), "|cff00ccffCopy Live Summary|r")
+        end)
+        MakeChannelBtn("|cffff6666Cancel|r", -118, nil)
 
         m:Hide()
         postMenu = m
@@ -1202,78 +633,11 @@ local function TogglePostMenu(anchorBtn)
     if postMenu:IsShown() then
         postMenu:Hide()
     else
-        ApplyBackdropTheme(postMenu, false)
+        ns.Utils.ApplyBackdropTheme(postMenu, false, false)
         postMenu:ClearAllPoints()
         postMenu:SetPoint("TOP", anchorBtn, "BOTTOM", 0, -4)
         postMenu:Show()
     end
-end
-
-local function CreateLootPanel(parentFrame, toggleTabBtn)
-    if lootFrame then return lootFrame end
-
-    local lf = CreateFrame("Frame", "FarmTrackerLootFrame", parentFrame, "BackdropTemplate")
-    lf:SetWidth(244)
-    lf:SetHeight(parentFrame:GetHeight())
-    lf:SetPoint("TOPLEFT", toggleTabBtn, "TOPRIGHT", 1, 24)
-    lf:SetFrameStrata("MEDIUM")
-    lf:SetClampedToScreen(true)
-
-    local header = lf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", 10, -8)
-    header:SetText("|cff00ccffLoot|r |cffaaaaaa(0)|r")
-    lf.header = header
-
-    local filterBtn = CreateFrame("Button", nil, lf, "UIPanelButtonTemplate")
-    filterBtn:SetSize(82, 18)
-    filterBtn:SetPoint("TOPRIGHT", -8, -5)
-    filterBtn:SetNormalFontObject("GameFontHighlightSmall")
-    filterBtn:SetText("All")
-    filterBtn:SetScript("OnClick", function()
-        local cur = ns.db.timerLootMinQual or 0
-        local nextQ = 0
-        for i, qf in ipairs(QUALITY_FILTERS) do
-            if qf.minQ == cur then
-                nextQ = QUALITY_FILTERS[(i % #QUALITY_FILTERS) + 1].minQ
-                break
-            end
-        end
-        ns.db.timerLootMinQual = nextQ
-        UpdateLootList()
-    end)
-    filterBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Click to filter Loot Window by minimum item quality", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    filterBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    lf.filterBtn = filterBtn
-
-    local div = lf:CreateTexture(nil, "ARTWORK")
-    div:SetColorTexture(0.25, 0.25, 0.3, 0.8)
-    div:SetSize(224, 1)
-    div:SetPoint("TOP", 0, -26)
-
-    local scrollFrame = CreateFrame("ScrollFrame", "FarmTrackerLootScroll", lf, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 8, -32)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -28, 10)
-
-    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-    scrollChild:SetWidth(206)
-    scrollChild:SetHeight(1)
-    scrollFrame:SetScrollChild(scrollChild)
-
-    lf.scrollFrame = scrollFrame
-    lf.scrollChild = scrollChild
-
-    local emptyText = lf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    emptyText:SetPoint("CENTER", 0, -6)
-    emptyText:SetText("No matching items looted.")
-    lf.emptyText = emptyText
-
-    lf:Hide()
-    lootFrame = lf
-    return lf
 end
 
 local function CreateTimerUI()
@@ -1295,14 +659,11 @@ local function CreateTimerUI()
     end
 
     f:SetScript("OnDragStart", function(self)
-        if not ns.db.timerLocked then
-            self:StartMoving()
-        end
+        if not ns.db.timerLocked then self:StartMoving() end
     end)
     f:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        local left = self:GetLeft()
-        local top  = self:GetTop()
+        local left, top = self:GetLeft(), self:GetTop()
         if left and top then
             ns.db.timerPos = { point = "TOPLEFT", x = left, y = top }
         else
@@ -1325,7 +686,7 @@ local function CreateTimerUI()
     closeBtn:SetScript("OnClick", function()
         state.isShown = false
         if postMenu then postMenu:Hide() end
-        if lootContextMenu then lootContextMenu:Hide() end
+        if ns.LootWindow then ns.LootWindow:HideMenus() end
         f:Hide()
     end)
 
@@ -1379,7 +740,6 @@ local function CreateTimerUI()
     end)
     f.lockBtn = lockBtn
 
-    -- Compact / Mini Mode Toggle Button
     local compactBtn = CreateFrame("Button", nil, f)
     compactBtn:SetSize(16, 16)
     compactBtn:SetPoint("RIGHT", lockBtn, "LEFT", -2, 0)
@@ -1394,8 +754,9 @@ local function CreateTimerUI()
     compactBtn:SetScript("OnClick", function()
         ns.db.compactMode = not ns.db.compactMode
         ApplyLayoutMode()
+        ApplyLockState()
         UpdateDisplay()
-        UpdateLootPanelVisibility()
+        if ns.LootWindow then ns.LootWindow:UpdateVisibility(f) end
     end)
     f.compactBtn = compactBtn
 
@@ -1421,17 +782,17 @@ local function CreateTimerUI()
     lootToggleBtn:SetText(">")
     lootToggleBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(IsLootPanelOpen() and "Hide Loot Window" or "Show Loot Window", 1, 1, 1)
+        GameTooltip:SetText(ns.db.timerLootOpen and "Hide Loot Window" or "Show Loot Window", 1, 1, 1)
         GameTooltip:Show()
     end)
     lootToggleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     lootToggleBtn:SetScript("OnClick", function()
-        ns.db.timerLootOpen = not IsLootPanelOpen()
-        UpdateLootPanelVisibility()
+        ns.db.timerLootOpen = not ns.db.timerLootOpen
+        if ns.LootWindow then ns.LootWindow:UpdateVisibility(f) end
     end)
     f.lootToggleBtn = lootToggleBtn
 
-    CreateLootPanel(f, lootToggleBtn)
+    if ns.LootWindow then ns.LootWindow:Create(f, lootToggleBtn) end
 
     local div1 = f:CreateTexture(nil, "ARTWORK")
     div1:SetColorTexture(0.25, 0.25, 0.3, 0.8)
@@ -1439,14 +800,12 @@ local function CreateTimerUI()
     div1:SetPoint("TOP", 0, -26)
     f.div1 = div1
 
-    -- Compact Mode Single-Line Summary
     local compactText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     compactText:SetPoint("TOP", 0, -32)
     compactText:SetText("00:00  |  0c/hr")
     compactText:Hide()
     f.compactText = compactText
 
-    -- Dual Timer Columns
     local sessionLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     sessionLabel:SetText("|cffaaaaaaSession Total|r")
     f.sessionLabel = sessionLabel
@@ -1529,17 +888,16 @@ local function CreateTimerUI()
     valModeBtn:SetNormalFontObject("GameFontHighlightSmall")
     valModeBtn:SetText("|cff00ccffAH + Raw|r")
     valModeBtn:SetScript("OnClick", function()
-        if not HasAnyAHAddon() then
+        if not ns.Pricing.HasAnyAHAddon() then
             ns:Print("Install TradeSkillMaster or Auctionator to enable AH valuation. Using Vendor + Raw.")
             return
         end
         ns.db.timerVendorOnly = not ns.db.timerVendorOnly
         UpdateDisplay()
-        UpdateLootList()
+        if ns.LootWindow then ns.LootWindow:UpdateList() end
     end)
     f.valModeBtn = valModeBtn
 
-    -- Session Goal Progress Bar
     local goalBar = CreateFrame("StatusBar", nil, f)
     goalBar:SetSize(252, 16)
     goalBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
@@ -1567,13 +925,15 @@ local function CreateTimerUI()
     end
 
     f.startBtn = CreateActionButton("|cff00ff00Start|r", 80, 10, function()
-        state.isRunning = not state.isRunning
+        autoPausedReason = nil
+        state.isRunning  = not state.isRunning
         if state.isRunning then state.lastSaveTime = GetTime() end
         UpdateDisplay()
     end)
 
     f.resetBtn = CreateActionButton("Reset", 80, 98, function()
         SaveCurrentSessionToHistory()
+        autoPausedReason     = nil
         state.isRunning      = false
         state.sessionTime    = 0
         state.runTime        = 0
@@ -1586,15 +946,16 @@ local function CreateTimerUI()
         state.ahCopper       = 0
         state.repairCopper   = 0
         state.sessionXP      = 0
-        state.mobsKilled     = 0
         state.lastSaveTime   = GetTime()
         wipe(state.lootLog)
         wipe(state.sessionIgnored)
         wipe(pendingItems)
         if postMenu then postMenu:Hide() end
-        if lootContextMenu then lootContextMenu:Hide() end
+        if ns.LootWindow then
+            ns.LootWindow:HideMenus()
+            ns.LootWindow:UpdateList()
+        end
         UpdateDisplay()
-        UpdateLootList()
     end)
 
     f.postBtn = CreateActionButton("|cff00ccffPost|r", 80, 186, function(self)
@@ -1627,31 +988,23 @@ local function CreateTimerUI()
             local desiredWidth = cx - screenLeft
             local newScale = desiredWidth / BASE_WIDTH
             local newPx = math.floor((newScale * BASE_FONT_SIZE) + 0.5)
-
             if newPx < 8 then newPx = 8 elseif newPx > 64 then newPx = 64 end
 
             if newPx ~= ns.db.timerFontSize then
                 ns.db.timerFontSize = newPx
                 ApplyFontSize()
                 local optMod = ns.Modules["Options"]
-                if optMod and optMod.SyncFontSize then
-                    optMod:SyncFontSize(newPx)
-                end
+                if optMod and optMod.SyncFontSize then optMod:SyncFontSize(newPx) end
             end
         end)
     end)
-
-    resizeBtn:SetScript("OnMouseUp", function(self)
-        self:SetScript("OnUpdate", nil)
-    end)
+    resizeBtn:SetScript("OnMouseUp", function(self) self:SetScript("OnUpdate", nil) end)
 
     local accum = 0
     f:SetScript("OnUpdate", function(_, dt)
         if not state.isRunning then return end
         state.sessionTime = state.sessionTime + dt
-        if IsDungeonMode() then
-            state.runTime = state.runTime + dt
-        end
+        if IsDungeonMode() then state.runTime = state.runTime + dt end
         accum = accum + dt
         if accum >= 0.2 then
             accum = 0
@@ -1673,8 +1026,14 @@ local function CreateTimerUI()
         f:Hide()
     end
 
-    UpdateLootPanelVisibility()
+    if ns.LootWindow then ns.LootWindow:UpdateVisibility(f) end
     return f
+end
+
+function mod:OnLootBlacklistChanged()
+    RecalculateLootTotals()
+    UpdateDisplay()
+    if ns.LootWindow then ns.LootWindow:UpdateList() end
 end
 
 function mod:RefreshSettings()
@@ -1685,7 +1044,7 @@ function mod:RefreshSettings()
     ApplyFontSize()
     ApplyLockState()
     UpdateDisplay()
-    UpdateLootList()
+    if ns.LootWindow then ns.LootWindow:UpdateList() end
 end
 
 function mod:ToggleUI()
@@ -1693,9 +1052,9 @@ function mod:ToggleUI()
     if f:IsShown() then
         state.isShown = false
         if postMenu then postMenu:Hide() end
-        if lootContextMenu then lootContextMenu:Hide() end
+        if ns.LootWindow then ns.LootWindow:HideMenus() end
         f:Hide()
-        UpdateLootPanelVisibility()
+        if ns.LootWindow then ns.LootWindow:UpdateVisibility(f) end
     else
         state.isShown = true
         ApplyLayoutMode()
@@ -1703,17 +1062,42 @@ function mod:ToggleUI()
         ApplyLockState()
         f:Show()
         UpdateDisplay()
-        UpdateLootPanelVisibility()
+        if ns.LootWindow then ns.LootWindow:UpdateVisibility(f) end
     end
+end
+
+function mod:ToggleStartPause()
+    autoPausedReason = nil
+    state.isRunning  = not state.isRunning
+    if state.isRunning then state.lastSaveTime = GetTime() end
+    UpdateDisplay()
+end
+
+function mod:TriggerNewRun()
+    if IsDungeonMode() then
+        StartNextRun()
+        UpdateDisplay()
+    end
+end
+
+function mod:ToggleCompact()
+    local f = CreateTimerUI()
+    ns.db.compactMode = not ns.db.compactMode
+    ApplyLayoutMode()
+    ApplyLockState()
+    UpdateDisplay()
+    if ns.LootWindow then ns.LootWindow:UpdateVisibility(f) end
 end
 
 function mod:ToggleDebug()
     debugMode = not debugMode
-    ns:Print("FarmTimer debug mode: " .. (debugMode and "|cff00ff00ON|r" or "|cffff3333OFF|r"))
+    ns:Print("Tracker debug mode: " .. (debugMode and "|cff00ff00ON|r" or "|cffff3333OFF|r"))
 end
 
 function mod:TestDropAlert()
-    ShowDropAlert("|cffa335ee[Test Epic Drop]|r", "Test Epic Drop", 133784, 52500, 1)
+    if ns.LootWindow then
+        ns.LootWindow:ShowDropAlert("|cffa335ee[Test Epic Drop]|r", "Test Epic Drop", 133784, 52500, 1)
+    end
 end
 
 local function CheckAutoStartDungeon()
@@ -1722,12 +1106,13 @@ local function CheckAutoStartDungeon()
 
     if isDungeon and not wasInDungeon then
         if IsDungeonMode() and ns.db.timerAutoStart and not state.isRunning then
+            autoPausedReason   = nil
             state.isRunning    = true
             state.lastSaveTime = GetTime()
             if uiFrame and not uiFrame:IsShown() then
                 state.isShown = true
                 uiFrame:Show()
-                UpdateLootPanelVisibility()
+                if ns.LootWindow then ns.LootWindow:UpdateVisibility(uiFrame) end
             end
             UpdateDisplay()
             ns:Print("Entered dungeon — Farm Tracker |cff00ff00auto-started|r.")
@@ -1737,29 +1122,50 @@ local function CheckAutoStartDungeon()
     wasInDungeon = isDungeon
 end
 
+local function GetCurrentRepairCost()
+    if not _G.GetRepairAllCost then return 0 end
+    local cost, canRepair = GetRepairAllCost()
+    if canRepair and cost and cost > 0 then
+        return cost
+    end
+    return 0
+end
+
+local function TryMatchRepair()
+    local now = GetTime()
+    if pendingMoneySpent > 0 and pendingRepairDrop > 0 then
+        if math.abs(pendingMoneyTime - pendingRepairDropTime) <= 2 then
+            if pendingMoneySpent <= (pendingRepairDrop + 5) then
+                if state.isRunning or (state.sessionTime or 0) > 0 then
+                    state.repairCopper = (state.repairCopper or 0) + pendingMoneySpent
+                    DebugPrint("Recorded repair cost: " .. pendingMoneySpent .. "c")
+                    UpdateDisplay()
+                end
+                pendingMoneySpent = 0
+                pendingRepairDrop = 0
+            end
+        end
+    end
+
+    if pendingMoneySpent > 0 and (now - pendingMoneyTime) > 2 then
+        pendingMoneySpent = 0
+    end
+    if pendingRepairDrop > 0 and (now - pendingRepairDropTime) > 2 then
+        pendingRepairDrop = 0
+    end
+end
+
 function mod:OnInit()
     if not ns.db.farmTimer then return end
 
     InitSavedState()
     CreateTimerUI()
 
-    lastXP    = UnitXP("player") or 0
-    lastXPMax = UnitXPMax("player") or 0
-    lastLevel = UnitLevel("player") or 1
-    lastMoney = GetMoney() or 0
-
-    if not repairHooked and _G.RepairAllItems then
-        hooksecurefunc("RepairAllItems", function(useGuildBank)
-            if not useGuildBank and state.isRunning then
-                local cost, canRepair = GetRepairAllCost()
-                if canRepair and cost and cost > 0 then
-                    pendingRepairCost = cost
-                    pendingRepairTime = GetTime()
-                end
-            end
-        end)
-        repairHooked = true
-    end
+    lastXP         = UnitXP("player") or 0
+    lastXPMax      = UnitXPMax("player") or 0
+    lastLevel      = UnitLevel("player") or 1
+    lastMoney      = GetMoney() or 0
+    lastRepairCost = GetCurrentRepairCost()
 
     local tracker = CreateFrame("Frame")
     tracker:RegisterEvent("CHAT_MSG_MONEY")
@@ -1771,12 +1177,12 @@ function mod:OnInit()
     tracker:RegisterEvent("PLAYER_XP_UPDATE")
     tracker:RegisterEvent("PLAYER_LEVEL_UP")
     tracker:RegisterEvent("MERCHANT_SHOW")
-    tracker:RegisterEvent("MERCHANT_CLOSED")
+    tracker:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
     tracker:RegisterEvent("PLAYER_MONEY")
-    tracker:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
     tracker:RegisterEvent("BAG_UPDATE_DELAYED")
     tracker:RegisterEvent("PLAYER_FLAGS_CHANGED")
     tracker:RegisterEvent("PLAYER_UPDATE_RESTING")
+    tracker:RegisterEvent("PLAYER_REGEN_DISABLED")
     tracker:RegisterEvent("PLAYER_LOGOUT")
 
     tracker:SetScript("OnEvent", function(_, event, arg1, arg2)
@@ -1785,55 +1191,81 @@ function mod:OnInit()
 
         elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
             CheckAutoStartDungeon()
+            lastRepairCost = GetCurrentRepairCost()
 
         elseif event == "BAG_UPDATE_DELAYED" then
             UpdateDisplay()
 
         elseif event == "PLAYER_FLAGS_CHANGED" and arg1 == "player" then
             if state.isRunning and ns.db.autoPauseAFK and UnitIsAFK("player") then
-                state.isRunning = false
+                state.isRunning  = false
+                autoPausedReason = "AFK"
                 UpdateDisplay()
                 ns:Print("Auto-paused timer (|cffffaa00AFK|r).")
+            elseif not state.isRunning and autoPausedReason == "AFK" and ns.db.autoResume and not UnitIsAFK("player") then
+                state.isRunning    = true
+                state.lastSaveTime = GetTime()
+                autoPausedReason   = nil
+                UpdateDisplay()
+                ns:Print("Auto-resumed timer (|cff00ff00AFK cleared|r).")
             end
 
         elseif event == "PLAYER_UPDATE_RESTING" then
             if state.isRunning and ns.db.autoPauseCity and IsResting() then
-                state.isRunning = false
+                state.isRunning  = false
+                autoPausedReason = "CITY"
                 UpdateDisplay()
                 ns:Print("Auto-paused timer (|cffffaa00Entered City / Rested Area|r).")
+            elseif not state.isRunning and autoPausedReason == "CITY" and ns.db.autoResume and not IsResting() then
+                state.isRunning    = true
+                state.lastSaveTime = GetTime()
+                autoPausedReason   = nil
+                UpdateDisplay()
+                ns:Print("Auto-resumed timer (|cff00ff00Left Rested Area|r).")
+            end
+
+        elseif event == "PLAYER_REGEN_DISABLED" then
+            if not state.isRunning and autoPausedReason and ns.db.autoResumeCombat then
+                state.isRunning    = true
+                state.lastSaveTime = GetTime()
+                autoPausedReason   = nil
+                UpdateDisplay()
+                ns:Print("Auto-resumed timer (|cff00ff00Entered Combat|r).")
             end
 
         elseif event == "MERCHANT_SHOW" then
-            merchantOpen = true
-            lastMoney    = GetMoney() or lastMoney
+            lastMoney = GetMoney() or lastMoney
+            local curCost = GetCurrentRepairCost()
+            if curCost > 0 then
+                lastRepairCost = curCost
+            end
 
-        elseif event == "MERCHANT_CLOSED" then
-            merchantOpen      = false
-            pendingRepairCost = 0
+        elseif event == "UPDATE_INVENTORY_DURABILITY" then
+            local curCost = GetCurrentRepairCost()
+            if curCost < lastRepairCost then
+                pendingRepairDrop     = lastRepairCost - curCost
+                pendingRepairDropTime = GetTime()
+                lastRepairCost        = curCost
+                TryMatchRepair()
+            else
+                lastRepairCost = curCost
+            end
 
         elseif event == "PLAYER_MONEY" then
             local curMoney = GetMoney() or 0
             local spent    = lastMoney - curMoney
             lastMoney      = curMoney
 
-            if state.isRunning and spent > 0 then
-                if pendingRepairCost > 0 and (GetTime() - pendingRepairTime) < 3 and spent == pendingRepairCost then
-                    state.repairCopper = (state.repairCopper or 0) + spent
-                    pendingRepairCost  = 0
-                    DebugPrint("Recorded RepairAll cost: " .. spent .. "c")
-                    UpdateDisplay()
-                elseif merchantOpen and InRepairMode and InRepairMode() then
-                    state.repairCopper = (state.repairCopper or 0) + spent
-                    DebugPrint("Recorded single-item repair: " .. spent .. "c")
-                    UpdateDisplay()
+            if spent > 0 then
+                local curCost = GetCurrentRepairCost()
+                if curCost < lastRepairCost then
+                    pendingRepairDrop     = lastRepairCost - curCost
+                    pendingRepairDropTime = GetTime()
+                    lastRepairCost        = curCost
                 end
-            end
-
-        elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-            if not state.isRunning then return end
-            local _, subevent, _, _, _, _, _, destGUID = CombatLogGetCurrentEventInfo()
-            if subevent == "PARTY_KILL" and destGUID and string.sub(destGUID, 1, 8) == "Creature" then
-                state.mobsKilled = (state.mobsKilled or 0) + 1
+                pendingMoneySpent = spent
+                pendingMoneyTime  = GetTime()
+                TryMatchRepair()
             end
 
         elseif event == "PLAYER_XP_UPDATE" then
@@ -1841,7 +1273,7 @@ function mod:OnInit()
             local curXPMax = UnitXPMax("player") or 0
             local curLevel = UnitLevel("player") or lastLevel
 
-            if state.isRunning and not IsMaxLevel() then
+            if state.isRunning and not ns.Utils.IsMaxLevel() then
                 local gained = 0
                 if curLevel > lastLevel then
                     gained = (lastXPMax - lastXP) + curXP
@@ -1871,8 +1303,7 @@ function mod:OnInit()
         elseif event == "CHAT_MSG_MONEY" and arg1 then
             DebugPrint("CHAT_MSG_MONEY: " .. tostring(arg1))
             if not state.isRunning then return end
-
-            local copper = ParseLootedCoin(arg1)
+            local copper = ns.Utils.ParseLootedCoin(arg1)
             if copper > 0 then
                 state.rawCopper = state.rawCopper + copper
                 UpdateDisplay()

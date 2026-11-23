@@ -6,71 +6,6 @@ local MAX_HISTORY = 50
 local histFrame   = nil
 local histRows    = {}
 
-local function FormatMoneyUI(copper)
-    copper = math.floor(copper or 0)
-    local isNeg = copper < 0
-    local absC  = math.abs(copper)
-    local g = math.floor(absC / 10000)
-    local s = math.floor((absC % 10000) / 100)
-    local c = absC % 100
-    local sign = isNeg and "|cffff4444-|r" or ""
-
-    if g > 0 then
-        return string.format("%s|cffffd700%dg|r |cffc7c7cf%ds|r", sign, g, s)
-    elseif s > 0 then
-        return string.format("%s|cffc7c7cf%ds|r |cffeda55f%dc|r", sign, s, c)
-    else
-        return string.format("%s|cffeda55f%dc|r", sign, c)
-    end
-end
-
-local function FormatDuration(sec)
-    sec = math.floor(sec or 0)
-    local hrs  = math.floor(sec / 3600)
-    local mins = math.floor((sec % 3600) / 60)
-    local secs = sec % 60
-    if hrs > 0 then
-        return string.format("%dh %02dm", hrs, mins)
-    else
-        return string.format("%dm %02ds", mins, secs)
-    end
-end
-
-local function FormatXP(xp)
-    xp = math.floor(xp or 0)
-    if xp >= 1000000 then
-        return string.format("%.2fM", xp / 1000000)
-    elseif xp >= 1000 then
-        return string.format("%.1fk", xp / 1000)
-    end
-    return tostring(xp)
-end
-
-local function ApplyHistoryTheme(frame)
-    if not frame or not frame.SetBackdrop then return end
-    if ns.db.timerTheme == "classic" then
-        frame:SetBackdrop({
-            bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile     = true,
-            tileSize = 32,
-            edgeSize = 16,
-            insets   = { left = 4, right = 4, top = 4, bottom = 4 },
-        })
-        frame:SetBackdropColor(1, 1, 1, 0.96)
-        frame:SetBackdropBorderColor(0.85, 0.75, 0.55, 1)
-    else
-        frame:SetBackdrop({
-            bgFile   = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            tile     = false,
-            edgeSize = 1,
-        })
-        frame:SetBackdropColor(0.06, 0.06, 0.09, 0.96)
-        frame:SetBackdropBorderColor(0.25, 0.25, 0.32, 1)
-    end
-end
-
 local function EnsureHistoryDB()
     FarmTrackerDB.history = FarmTrackerDB.history or {}
     return FarmTrackerDB.history
@@ -90,7 +25,8 @@ end
 
 function mod:RefreshList()
     if not histFrame then return end
-    ApplyHistoryTheme(histFrame)
+    local Utils = ns.Utils
+    Utils.ApplyBackdropTheme(histFrame, false, false)
 
     local list = EnsureHistoryDB()
     if #list == 0 then
@@ -155,33 +91,54 @@ function mod:RefreshList()
                 if e.charName and e.charName ~= "" then
                     GameTooltip:AddDoubleLine("Character:", e.charName, 0.7, 0.7, 0.7, 1, 1, 1)
                 end
-                GameTooltip:AddDoubleLine("Duration:", FormatDuration(e.duration), 0.7, 0.7, 0.7, 1, 1, 1)
+                GameTooltip:AddDoubleLine("Duration:", Utils.FormatDuration(e.duration), 0.7, 0.7, 0.7, 1, 1, 1)
                 GameTooltip:AddDoubleLine("GPH Mode:", (e.modeTag or "AH") .. " + Raw", 0.7, 0.7, 0.7, 0.4, 0.85, 1)
                 GameTooltip:AddLine(" ")
-                GameTooltip:AddDoubleLine("Raw Looted Coin:", FormatMoneyUI(e.rawCopper), 0.7, 0.7, 0.7, 1, 1, 1)
-                GameTooltip:AddDoubleLine("Items (Vendor):", FormatMoneyUI(e.vendorCopper), 0.7, 0.7, 0.7, 1, 1, 1)
-                GameTooltip:AddDoubleLine("Items (AH / Est):", FormatMoneyUI(e.ahCopper), 0.7, 0.7, 0.7, 1, 1, 1)
+                GameTooltip:AddDoubleLine("Raw Looted Coin:", Utils.FormatMoneyUI(e.rawCopper), 0.7, 0.7, 0.7, 1, 1, 1)
+                GameTooltip:AddDoubleLine("Items (Vendor):", Utils.FormatMoneyUI(e.vendorCopper), 0.7, 0.7, 0.7, 1, 1, 1)
+                GameTooltip:AddDoubleLine("Items (AH / Est):", Utils.FormatMoneyUI(e.ahCopper), 0.7, 0.7, 0.7, 1, 1, 1)
                 if (e.repairCopper or 0) > 0 then
-                    GameTooltip:AddDoubleLine("Repair Costs:", "|cffff5555-|r" .. FormatMoneyUI(e.repairCopper), 1, 0.4, 0.4, 1, 0.4, 0.4)
+                    GameTooltip:AddDoubleLine("Repair Costs:", "|cffff5555-|r" .. Utils.FormatMoneyUI(e.repairCopper), 1, 0.4, 0.4, 1, 0.4, 0.4)
                 end
-                GameTooltip:AddDoubleLine("|cffffd700Net Profit:|r", FormatMoneyUI(e.netCopper), 1, 0.85, 0, 1, 1, 1)
-                GameTooltip:AddDoubleLine("|cff00ccffNet Gold / Hr:|r", FormatMoneyUI(e.gphCopper) .. "/hr", 0, 0.8, 1, 1, 1, 1)
+                GameTooltip:AddDoubleLine("|cffffd700Net Profit:|r", Utils.FormatMoneyUI(e.netCopper), 1, 0.85, 0, 1, 1, 1)
+                GameTooltip:AddDoubleLine("|cff00ccffNet Gold / Hr:|r", Utils.FormatMoneyUI(e.gphCopper) .. "/hr", 0, 0.8, 1, 1, 1, 1)
 
-                if e.dungeonMode or (e.runs or 0) > 0 or (e.sessionXP or 0) > 0 or (e.mobsKilled or 0) > 0 then
+                if e.dungeonMode or (e.runs or 0) > 0 or (e.sessionXP or 0) > 0 then
                     GameTooltip:AddLine(" ")
                     if e.dungeonMode or (e.runs or 0) > 0 then
                         GameTooltip:AddDoubleLine("Completed Runs:", tostring(e.runs or 0), 0.7, 0.7, 0.7, 1, 1, 1)
                     end
                     if (e.sessionXP or 0) > 0 then
-                        GameTooltip:AddDoubleLine("Session XP:", "|cffc080ff" .. FormatXP(e.sessionXP) .. "|r", 0.7, 0.7, 0.7, 1, 1, 1)
-                    end
-                    if (e.mobsKilled or 0) > 0 then
-                        GameTooltip:AddDoubleLine("Mobs Killed:", tostring(e.mobsKilled), 0.7, 0.7, 0.7, 0.9, 0.9, 0.9)
+                        GameTooltip:AddDoubleLine("Session XP:", "|cffc080ff" .. Utils.FormatXP(e.sessionXP) .. "|r", 0.7, 0.7, 0.7, 1, 1, 1)
                     end
                 end
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("|cffaaaaaaClick row to copy summary|r")
                 GameTooltip:Show()
             end)
             row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            row:SetScript("OnClick", function(self)
+                local e = self.entryData
+                if not e then return end
+                local repairStr = (e.repairCopper or 0) > 0 and (" // Repairs: -" .. Utils.FormatMoneyPlain(e.repairCopper)) or ""
+                local runStr    = (e.runs or 0) > 0 and (" // Runs: " .. e.runs) or ""
+                local text = string.format(
+                    "[Farm Tracker] %s (%s) - Time: %s%s // Net (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s%s",
+                    e.zone or "Unknown",
+                    e.dateStr or "",
+                    Utils.FormatDuration(e.duration),
+                    runStr,
+                    e.modeTag or "AH",
+                    Utils.FormatMoneyPlain(e.netCopper),
+                    Utils.FormatMoneyPlain(e.gphCopper),
+                    Utils.FormatMoneyPlain(e.rawCopper),
+                    Utils.FormatMoneyPlain(e.vendorCopper),
+                    Utils.FormatMoneyPlain(e.ahCopper),
+                    repairStr
+                )
+                Utils.ShowCopyPopup(text, "|cff00ccffCopy Session Summary|r")
+            end)
 
             histRows[i] = row
         end
@@ -193,9 +150,9 @@ function mod:RefreshList()
 
         local datePrefix = entry.dateStr and ("|cffaaaaaa" .. entry.dateStr .. "|r  ") or ""
         row.zoneTxt:SetText(datePrefix .. (entry.zone or "Unknown"))
-        row.durTxt:SetText("|cffcccccc" .. FormatDuration(entry.duration) .. "|r")
-        row.netTxt:SetText(FormatMoneyUI(entry.netCopper))
-        row.gphTxt:SetText(FormatMoneyUI(entry.gphCopper) .. "/hr")
+        row.durTxt:SetText("|cffcccccc" .. Utils.FormatDuration(entry.duration) .. "|r")
+        row.netTxt:SetText(Utils.FormatMoneyUI(entry.netCopper))
+        row.gphTxt:SetText(Utils.FormatMoneyUI(entry.gphCopper) .. "/hr")
 
         row.delBtn:SetScript("OnClick", function()
             table.remove(list, i)
@@ -306,13 +263,13 @@ local function CreateHistoryUI()
 
     f:Hide()
     histFrame = f
-    ApplyHistoryTheme(f)
+    ns.Utils.ApplyBackdropTheme(f, false, false)
     return f
 end
 
 function mod:RefreshTheme()
     if histFrame then
-        ApplyHistoryTheme(histFrame)
+        ns.Utils.ApplyBackdropTheme(histFrame, false, false)
     end
 end
 

@@ -3,6 +3,31 @@
 ### `CHANGELOG.md`
 
 ```markdown
+
+## [0.0.5] - 2026-11-23
+
+### Added
+* **Tabbed Settings Menu:** Reorganized `/ft config` into 4 tabs (**Appearance**, **Display**, **Loot & AH**, and **Automation**) so the window stays compact.
+* **Individual Blocklist Manager:** View and remove individual items from your Global Blocklist directly in the **Loot & AH** tab.
+* **Drop Alert Sound Options:** Added a sound picker dropdown (Coins, Map Ping, Whisper, Ready Check, Quest Complete, Raid Warning) with instant previews, a **Mute Alert Sound** (flash banner only) checkbox, and a **Test** button in Settings.
+* **Background Opacity & Click-Through:** Added an opacity slider (10%–100%) for the tracker and loot windows, plus an option to make Compact Mode click-through when locked.
+* **Auto-Resume:** Added options to automatically resume the timer when clearing AFK, leaving a rested area, or entering combat (only triggers if the timer was auto-paused).
+* **Key Bindings (`Bindings.xml`):** Added Farm Tracker bindings to WoW's Key Bindings menu for Toggle Window, Start/Pause, New Run, and Compact Mode.
+* **Copy Summary (`Ctrl+C`):** Added a copyable text popup to the **Post** menu and made Session History rows clickable to copy past runs for Discord or spreadsheets.
+
+### Changed
+* Refactored `FarmTimer.lua` into smaller modules: `Core\Utils.lua`, `Modules\Pricing.lua`, `Modules\LootWindow.lua`, and `Modules\Tracker.lua`.
+* Updated `History.lua` and `Options.lua` to use shared formatting and backdrop theming from `Utils.lua`.
+* Reworked repair cost detection to match durability changes against gold spent, supporting manual repairs, single-item repairs, auto-repair addons, and repairs while paused in cities (still ignores guild bank repairs).
+
+### Removed
+* Removed `COMBAT_LOG_EVENT_UNFILTERED` tracking and the background mob kill counter.
+* Removed duplicate code at the bottom of `VersionCheck.lua`.
+
+### Fixed
+* Fixed an `ADDON_ACTION_FORBIDDEN` error on login/reload caused by registering `COMBAT_LOG_EVENT_UNFILTERED`.
+* Fixed repair costs staying stuck at `0c`.
+
 ## [0.0.4] - 2026-11-22
 
 ### Added
@@ -24,7 +49,7 @@
 
 ### Fixed
 * Fixed blank font previews in the font dropdown for unavailable/missing font files.
-* Clamped text inside the Font Family and AH Price Source buttons so long names no longer overflow the button borders.v
+* Clamped text inside the Font Family and AH Price Source buttons so long names no longer overflow the button borders.
 
 ## [0.0.3] - 2026-11-21
 ### Changed

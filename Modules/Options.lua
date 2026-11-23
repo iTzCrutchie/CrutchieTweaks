@@ -1,9 +1,12 @@
 local _, ns = ...
 
 local mod = ns:RegisterModule("Options", {})
+
 local optFrame      = nil
 local fontDropdown  = nil
 local priceDropdown = nil
+local soundDropdown = nil
+local blRows        = {}
 
 local PRICE_SOURCES = {
     { key = "AUTO",        label = "Auto (TSM / Auc)" },
@@ -21,6 +24,13 @@ local function GetPriceSourceLabel(key)
     return "Auto (TSM / Auc)"
 end
 
+local function GetAlertSoundLabel(key)
+    for _, s in ipairs(ns.Utils.AlertSounds) do
+        if s.key == key then return s.label end
+    end
+    return "Loot Coins"
+end
+
 local function FormatThresholdText(copper)
     copper = math.floor(copper or 0)
     if copper <= 0 then return "0c" end
@@ -34,7 +44,7 @@ local function FormatThresholdText(copper)
     return table.concat(parts, " ")
 end
 
-local function ParseThresholdInput(text)
+local function ParseThresholdInput(text, fallback)
     if not text then return 0 end
     local clean = string.lower(strtrim(text))
     if clean == "" or clean == "0" or clean == "0c" then return 0 end
@@ -47,20 +57,11 @@ local function ParseThresholdInput(text)
         return math.floor((g * 10000) + (s * 100) + c + 0.5)
     end
 
-    -- Plain number without units defaults to gold (e.g. "2.5" -> 2g 50s)
     local plain = tonumber(clean)
     if plain and plain >= 0 then
         return math.floor((plain * 10000) + 0.5)
     end
-    return ns.db.dropAlertThreshold or 20000
-end
-
-local function CountBlacklist()
-    local n = 0
-    if type(ns.db.globalBlacklist) == "table" then
-        for _ in pairs(ns.db.globalBlacklist) do n = n + 1 end
-    end
-    return n
+    return fallback or 0
 end
 
 local function GetAvailableFonts()
@@ -98,39 +99,22 @@ end
 
 ns.GetAvailableFonts = GetAvailableFonts
 
-local function ApplyOptionsTheme(frame)
-    if not frame or not frame.SetBackdrop then return end
-    if ns.db.timerTheme == "classic" then
-        frame:SetBackdrop({
-            bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile     = true,
-            tileSize = 32,
-            edgeSize = 16,
-            insets   = { left = 4, right = 4, top = 4, bottom = 4 },
-        })
-        frame:SetBackdropColor(1, 1, 1, 0.96)
-        frame:SetBackdropBorderColor(0.85, 0.75, 0.55, 1)
-    else
-        frame:SetBackdrop({
-            bgFile   = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            tile     = false,
-            edgeSize = 1,
-        })
-        frame:SetBackdropColor(0.06, 0.06, 0.09, 0.96)
-        frame:SetBackdropBorderColor(0.25, 0.25, 0.32, 1)
-    end
+local function HideDropdowns()
+    if fontDropdown then fontDropdown:Hide() end
+    if priceDropdown then priceDropdown:Hide() end
+    if soundDropdown then soundDropdown:Hide() end
 end
 
 local function NotifyRefresh()
-    ApplyOptionsTheme(optFrame)
-    ApplyOptionsTheme(fontDropdown)
-    ApplyOptionsTheme(priceDropdown)
+    local Utils = ns.Utils
+    Utils.ApplyBackdropTheme(optFrame, false, false)
+    Utils.ApplyBackdropTheme(fontDropdown, false, false)
+    Utils.ApplyBackdropTheme(priceDropdown, false, false)
+    Utils.ApplyBackdropTheme(soundDropdown, false, false)
 
-    local timerMod = ns.Modules["FarmTimer"]
-    if timerMod and timerMod.RefreshSettings then
-        timerMod:RefreshSettings()
+    local trackerMod = ns.Modules["Tracker"]
+    if trackerMod and trackerMod.RefreshSettings then
+        trackerMod:RefreshSettings()
     end
     local miniMod = ns.Modules["MinimapButton"]
     if miniMod and miniMod.Refresh then
@@ -142,12 +126,25 @@ local function NotifyRefresh()
     end
 end
 
+local function ClampButtonText(btn)
+    local fs = btn:GetFontString()
+    if fs then
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", 8, 0)
+        fs:SetPoint("RIGHT", -8, 0)
+        fs:SetJustifyH("CENTER")
+        fs:SetWordWrap(false)
+    end
+end
+
 local function TogglePriceDropdown(anchorBtn)
-    if fontDropdown then fontDropdown:Hide() end
+    local wasShown = priceDropdown and priceDropdown:IsShown()
+    HideDropdowns()
+    if wasShown then return end
 
     if not priceDropdown then
         local dd = CreateFrame("Frame", "FarmTrackerPriceDropdown", optFrame, "BackdropTemplate")
-        dd:SetWidth(150)
+        dd:SetWidth(155)
         dd:SetFrameStrata("TOOLTIP")
         dd:SetClampedToScreen(true)
         dd.buttons = {}
@@ -155,12 +152,7 @@ local function TogglePriceDropdown(anchorBtn)
         priceDropdown = dd
     end
 
-    if priceDropdown:IsShown() then
-        priceDropdown:Hide()
-        return
-    end
-
-    ApplyOptionsTheme(priceDropdown)
+    ns.Utils.ApplyBackdropTheme(priceDropdown, false, false)
     priceDropdown:SetHeight((#PRICE_SOURCES * 22) + 12)
 
     for i, src in ipairs(PRICE_SOURCES) do
@@ -201,8 +193,68 @@ local function TogglePriceDropdown(anchorBtn)
     priceDropdown:Show()
 end
 
+local function ToggleSoundDropdown(anchorBtn)
+    local wasShown = soundDropdown and soundDropdown:IsShown()
+    HideDropdowns()
+    if wasShown then return end
+
+    if not soundDropdown then
+        local dd = CreateFrame("Frame", "FarmTrackerSoundDropdown", optFrame, "BackdropTemplate")
+        dd:SetWidth(155)
+        dd:SetFrameStrata("TOOLTIP")
+        dd:SetClampedToScreen(true)
+        dd.buttons = {}
+        dd:Hide()
+        soundDropdown = dd
+    end
+
+    local sounds = ns.Utils.AlertSounds
+    ns.Utils.ApplyBackdropTheme(soundDropdown, false, false)
+    soundDropdown:SetHeight((#sounds * 22) + 12)
+
+    for i, s in ipairs(sounds) do
+        local btn = soundDropdown.buttons[i]
+        if not btn then
+            btn = CreateFrame("Button", nil, soundDropdown)
+            btn:SetHeight(20)
+
+            local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(0.2, 0.5, 0.8, 0.3)
+
+            local txt = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            txt:SetPoint("LEFT", 6, 0)
+            txt:SetPoint("RIGHT", -6, 0)
+            txt:SetJustifyH("LEFT")
+            btn.txt = txt
+
+            soundDropdown.buttons[i] = btn
+        end
+
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", 6, -6 - ((i - 1) * 22))
+        btn:SetPoint("TOPRIGHT", -6, -6 - ((i - 1) * 22))
+        btn.txt:SetText(s.label)
+
+        btn:SetScript("OnClick", function()
+            ns.db.dropAlertSound = s.key
+            anchorBtn:SetText(s.label .. "  v")
+            soundDropdown:Hide()
+            ns.Utils.PlayDropAlertSound()
+        end)
+        btn:Show()
+    end
+
+    soundDropdown:ClearAllPoints()
+    soundDropdown:SetPoint("TOP", anchorBtn, "BOTTOM", 0, -2)
+    soundDropdown:Show()
+end
+
 local function ToggleFontDropdown(anchorBtn)
-    if priceDropdown then priceDropdown:Hide() end
+    local wasShown = fontDropdown and fontDropdown:IsShown()
+    HideDropdowns()
+    if wasShown then return end
+
     local fonts = GetAvailableFonts()
 
     if not fontDropdown then
@@ -227,12 +279,7 @@ local function ToggleFontDropdown(anchorBtn)
         fontDropdown = dd
     end
 
-    if fontDropdown:IsShown() then
-        fontDropdown:Hide()
-        return
-    end
-
-    ApplyOptionsTheme(fontDropdown)
+    ns.Utils.ApplyBackdropTheme(fontDropdown, false, false)
 
     local rowHeight   = 22
     local totalHeight = (#fonts * rowHeight) + 12
@@ -288,15 +335,71 @@ local function ToggleFontDropdown(anchorBtn)
     fontDropdown:Show()
 end
 
-local function ClampButtonText(btn)
-    local fs = btn:GetFontString()
-    if fs then
-        fs:ClearAllPoints()
-        fs:SetPoint("LEFT", 8, 0)
-        fs:SetPoint("RIGHT", -8, 0)
-        fs:SetJustifyH("CENTER")
-        fs:SetWordWrap(false)
+local function RefreshBlacklistUI()
+    if not optFrame or not optFrame.blScrollChild then return end
+
+    local items = {}
+    if type(ns.db.globalBlacklist) == "table" then
+        for idKey, name in pairs(ns.db.globalBlacklist) do
+            table.insert(items, { id = idKey, name = tostring(name) })
+        end
     end
+    table.sort(items, function(a, b) return a.name:lower() < b.name:lower() end)
+
+    optFrame.blHeader:SetText(string.format("|cff00ccffGlobal Blocklist|r |cffaaaaaa(%d)|r", #items))
+
+    if #items == 0 then
+        optFrame.blEmpty:Show()
+    else
+        optFrame.blEmpty:Hide()
+    end
+
+    local rowHeight = 20
+    for i, info in ipairs(items) do
+        local row = blRows[i]
+        if not row then
+            row = CreateFrame("Frame", nil, optFrame.blScrollChild)
+            row:SetHeight(rowHeight)
+
+            local bg = row:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(1, 1, 1, (i % 2 == 0) and 0.04 or 0.0)
+
+            local delBtn = CreateFrame("Button", nil, row)
+            delBtn:SetSize(16, 16)
+            delBtn:SetPoint("RIGHT", -2, 0)
+            delBtn:SetNormalFontObject("GameFontHighlightSmall")
+            delBtn:SetText("|cffff5555x|r")
+            row.delBtn = delBtn
+
+            local txt = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            txt:SetPoint("LEFT", 4, 0)
+            txt:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+            txt:SetJustifyH("LEFT")
+            txt:SetWordWrap(false)
+            row.txt = txt
+
+            blRows[i] = row
+        end
+
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", optFrame.blScrollChild, "TOPLEFT", 0, -((i - 1) * rowHeight))
+        row:SetPoint("TOPRIGHT", optFrame.blScrollChild, "TOPRIGHT", 0, -((i - 1) * rowHeight))
+        row.txt:SetText(info.name)
+
+        row.delBtn:SetScript("OnClick", function()
+            ns.db.globalBlacklist[info.id] = nil
+            RefreshBlacklistUI()
+            NotifyRefresh()
+        end)
+        row:Show()
+    end
+
+    for i = #items + 1, #blRows do
+        blRows[i]:Hide()
+    end
+
+    optFrame.blScrollChild:SetHeight(math.max(#items * rowHeight, 1))
 end
 
 local function CreateOptionsUI()
@@ -304,7 +407,7 @@ local function CreateOptionsUI()
 
     local f = CreateFrame("Frame", "FarmTrackerOptionsFrame", UIParent, "BackdropTemplate")
     tinsert(UISpecialFrames, "FarmTrackerOptionsFrame")
-    f:SetWidth(316)
+    f:SetSize(350, 464)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -314,52 +417,11 @@ local function CreateOptionsUI()
 
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetScript("OnHide", function()
-        if fontDropdown then fontDropdown:Hide() end
-        if priceDropdown then priceDropdown:Hide() end
-    end)
-
-    local y = -12
-    f.checks = {}
-
-    local function AddDivider()
-        y = y - 6
-        local div = f:CreateTexture(nil, "ARTWORK")
-        div:SetColorTexture(0.25, 0.25, 0.3, 0.8)
-        div:SetSize(288, 1)
-        div:SetPoint("TOP", 0, y)
-        y = y - 8
-    end
-
-    local function AddHeader(text)
-        local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        hdr:SetPoint("TOPLEFT", 14, y)
-        hdr:SetText(text)
-        y = y - 18
-    end
-
-    local function AddCheckbox(key, label, onToggle)
-        local cb = CreateFrame("CheckButton", "FarmTrackerOptCheck_" .. key, f, "UICheckButtonTemplate")
-        cb:SetSize(22, 22)
-        cb:SetPoint("TOPLEFT", 14, y)
-        cb:SetScript("OnClick", function(self)
-            ns.db[key] = self:GetChecked() and true or false
-            if onToggle then onToggle(ns.db[key]) end
-            NotifyRefresh()
-        end)
-
-        local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-        lbl:SetText(label)
-
-        f.checks[key] = cb
-        y = y - 24
-        return cb
-    end
+    f:SetScript("OnHide", HideDropdowns)
 
     -- Title Bar
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 14, y)
+    title:SetPoint("TOPLEFT", 14, -12)
     title:SetText("|cff00ccffFarm Tracker|r Settings")
 
     local closeBtn = CreateFrame("Button", nil, f)
@@ -369,66 +431,147 @@ local function CreateOptionsUI()
     closeBtn:SetText("|cffff5555X|r")
     closeBtn:SetScript("OnClick", function() f:Hide() end)
 
-    y = y - 22
-    AddDivider()
+    local divTop = f:CreateTexture(nil, "ARTWORK")
+    divTop:SetColorTexture(0.25, 0.25, 0.3, 0.8)
+    divTop:SetSize(322, 1)
+    divTop:SetPoint("TOP", 0, -34)
 
-    -- 1. Theme Selector
-    local themeLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    themeLbl:SetPoint("TOPLEFT", 14, y - 4)
+    -- Tab Bar Setup (4 Tabs)
+    local tabDefs = {
+        { key = "appearance", label = "Appearance" },
+        { key = "display",    label = "Display" },
+        { key = "loot",       label = "Loot & AH" },
+        { key = "auto",       label = "Automation" },
+    }
+
+    f.tabs   = {}
+    f.panels = {}
+    f.checks = {}
+
+    local function SelectTab(activeKey)
+        HideDropdowns()
+        f.activeTab = activeKey
+        for _, def in ipairs(tabDefs) do
+            local isSel = (def.key == activeKey)
+            local tb = f.tabs[def.key]
+            local pn = f.panels[def.key]
+            if isSel then
+                tb:SetText("|cff00ccff" .. def.label .. "|r")
+                tb:Disable()
+                pn:Show()
+            else
+                tb:SetText("|cffcccccc" .. def.label .. "|r")
+                tb:Enable()
+                pn:Hide()
+            end
+        end
+        if activeKey == "loot" then
+            RefreshBlacklistUI()
+        end
+    end
+    f.SelectTab = SelectTab
+
+    for i, def in ipairs(tabDefs) do
+        local tb = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        tb:SetSize(78, 22)
+        tb:SetPoint("TOPLEFT", 14 + ((i - 1) * 81), -40)
+        tb:SetNormalFontObject("GameFontHighlightSmall")
+        tb:SetDisabledFontObject("GameFontHighlightSmall")
+        tb:SetScript("OnClick", function() SelectTab(def.key) end)
+        f.tabs[def.key] = tb
+
+        local panel = CreateFrame("Frame", nil, f)
+        panel:SetPoint("TOPLEFT", 14, -70)
+        panel:SetPoint("BOTTOMRIGHT", -14, 42)
+        panel:Hide()
+        f.panels[def.key] = panel
+    end
+
+    local divTab = f:CreateTexture(nil, "ARTWORK")
+    divTab:SetColorTexture(0.25, 0.25, 0.3, 0.8)
+    divTab:SetSize(322, 1)
+    divTab:SetPoint("TOP", 0, -66)
+
+    -- Shared panel builder helpers
+    local function AddHeader(panel, text, y)
+        local hdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        hdr:SetPoint("TOPLEFT", 0, y)
+        hdr:SetText(text)
+        return hdr, y - 18
+    end
+
+    local function AddDivider(panel, y)
+        y = y - 4
+        local div = panel:CreateTexture(nil, "ARTWORK")
+        div:SetColorTexture(0.25, 0.25, 0.3, 0.8)
+        div:SetSize(320, 1)
+        div:SetPoint("TOP", 0, y)
+        return y - 8
+    end
+
+    local function AddCheckbox(panel, key, label, y)
+        local cb = CreateFrame("CheckButton", "FarmTrackerOptCheck_" .. key, panel, "UICheckButtonTemplate")
+        cb:SetSize(22, 22)
+        cb:SetPoint("TOPLEFT", 0, y)
+        cb:SetScript("OnClick", function(self)
+            ns.db[key] = self:GetChecked() and true or false
+            NotifyRefresh()
+        end)
+
+        local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lbl:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+        lbl:SetText(label)
+
+        f.checks[key] = cb
+        return y - 22
+    end
+
+    -- =========================================================================
+    -- TAB 1: APPEARANCE
+    -- =========================================================================
+    local pApp = f.panels.appearance
+    local y = -4
+
+    local themeLbl = pApp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    themeLbl:SetPoint("TOPLEFT", 0, y - 4)
     themeLbl:SetText("UI Theme:")
 
-    local themeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    themeBtn:SetSize(140, 22)
-    themeBtn:SetPoint("TOPRIGHT", -14, y)
+    local themeBtn = CreateFrame("Button", nil, pApp, "UIPanelButtonTemplate")
+    themeBtn:SetSize(155, 22)
+    themeBtn:SetPoint("TOPRIGHT", 0, y)
     themeBtn:SetScript("OnClick", function(self)
         ns.db.timerTheme = (ns.db.timerTheme == "classic") and "dark" or "classic"
         self:SetText(ns.db.timerTheme == "classic" and "WoW Forever" or "Dark Modern")
         NotifyRefresh()
     end)
     f.themeBtn = themeBtn
-    y = y - 28
+    y = y - 30
 
-    -- 2. Font Dropdown Selector
-    local fontLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    fontLbl:SetPoint("TOPLEFT", 14, y - 4)
+    local fontLbl = pApp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    fontLbl:SetPoint("TOPLEFT", 0, y - 4)
     fontLbl:SetText("Font Family:")
 
-    local fontBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    fontBtn:SetSize(140, 22)
-    fontBtn:SetPoint("TOPRIGHT", -14, y)
+    local fontBtn = CreateFrame("Button", nil, pApp, "UIPanelButtonTemplate")
+    fontBtn:SetSize(155, 22)
+    fontBtn:SetPoint("TOPRIGHT", 0, y)
     fontBtn:SetScript("OnClick", function(self) ToggleFontDropdown(self) end)
     fontBtn:SetText("Friz Quadrata  v")
     ClampButtonText(fontBtn)
     f.fontBtn = fontBtn
-    y = y - 28
+    y = y - 32
 
-    -- 3. AH Price Source Dropdown
-    local priceLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    priceLbl:SetPoint("TOPLEFT", 14, y - 4)
-    priceLbl:SetText("AH Price Source:")
-
-    local priceBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    priceBtn:SetSize(140, 22)
-    priceBtn:SetPoint("TOPRIGHT", -14, y)
-    priceBtn:SetScript("OnClick", function(self) TogglePriceDropdown(self) end)
-    priceBtn:SetText("Auto (TSM / Auc)  v")
-    ClampButtonText(priceBtn)
-    f.priceBtn = priceBtn
-    y = y - 28
-
-    -- 4. Font Size Slider (8 - 64 px)
-    local sizeLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sizeLbl:SetPoint("TOPLEFT", 14, y)
+    local sizeLbl = pApp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    sizeLbl:SetPoint("TOPLEFT", 0, y)
     sizeLbl:SetText("Font Size:")
 
-    local sizeValLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    sizeValLbl:SetPoint("TOPRIGHT", -14, y)
+    local sizeValLbl = pApp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    sizeValLbl:SetPoint("TOPRIGHT", 0, y)
     sizeValLbl:SetText("11px")
     f.sizeValLbl = sizeValLbl
     y = y - 18
 
-    local slider = CreateFrame("Slider", "FarmTrackerFontSizeSlider", f, "OptionsSliderTemplate")
-    slider:SetWidth(280)
+    local slider = CreateFrame("Slider", "FarmTrackerFontSizeSlider", pApp, "OptionsSliderTemplate")
+    slider:SetWidth(308)
     slider:SetHeight(16)
     slider:SetPoint("TOP", 0, y)
     slider:SetMinMaxValues(8, 64)
@@ -448,95 +591,70 @@ local function CreateOptionsUI()
     end)
     f.slider = slider
     f.SetSyncing = function(_, val) isSyncing = val end
-    y = y - 24
+    y = y - 30
 
-    AddDivider()
+    local opLbl = pApp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    opLbl:SetPoint("TOPLEFT", 0, y)
+    opLbl:SetText("Background Opacity:")
 
-    -- Loot & Drop Alerts Section
-    AddHeader("|cff00ccffLoot & Drop Alerts|r")
-    AddCheckbox("dropAlertEnabled", "Enable High-Value Drop Alert")
+    local opValLbl = pApp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    opValLbl:SetPoint("TOPRIGHT", 0, y)
+    opValLbl:SetText("92%")
+    f.opValLbl = opValLbl
+    y = y - 18
 
-    local threshLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    threshLbl:SetPoint("TOPLEFT", 18, y - 4)
-    threshLbl:SetText("Alert Threshold |cffaaaaaa(0c = all)|r:")
+    local opSlider = CreateFrame("Slider", "FarmTrackerBgOpacitySlider", pApp, "OptionsSliderTemplate")
+    opSlider:SetWidth(308)
+    opSlider:SetHeight(16)
+    opSlider:SetPoint("TOP", 0, y)
+    opSlider:SetMinMaxValues(10, 100)
+    opSlider:SetValueStep(5)
+    opSlider:SetObeyStepOnDrag(true)
+    if _G["FarmTrackerBgOpacitySliderLow"] then _G["FarmTrackerBgOpacitySliderLow"]:SetText("10%") end
+    if _G["FarmTrackerBgOpacitySliderHigh"] then _G["FarmTrackerBgOpacitySliderHigh"]:SetText("100%") end
+    if _G["FarmTrackerBgOpacitySliderText"] then _G["FarmTrackerBgOpacitySliderText"]:SetText("") end
 
-    local threshBox = CreateFrame("EditBox", "FarmTrackerAlertThresholdBox", f, "InputBoxTemplate")
-    threshBox:SetSize(86, 20)
-    threshBox:SetPoint("TOPRIGHT", -14, y)
-    threshBox:SetAutoFocus(false)
-    threshBox:SetJustifyH("CENTER")
-    threshBox:SetScript("OnEnterPressed", function(self)
-        ns.db.dropAlertThreshold = ParseThresholdInput(self:GetText())
-        self:SetText(FormatThresholdText(ns.db.dropAlertThreshold))
-        self:ClearFocus()
-    end)
-    threshBox:SetScript("OnEscapePressed", function(self)
-        self:SetText(FormatThresholdText(ns.db.dropAlertThreshold))
-        self:ClearFocus()
-    end)
-    threshBox:SetScript("OnEditFocusLost", function(self)
-        ns.db.dropAlertThreshold = ParseThresholdInput(self:GetText())
-        self:SetText(FormatThresholdText(ns.db.dropAlertThreshold))
-    end)
-    f.threshBox = threshBox
-    y = y - 26
-
-    local clearBlBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    clearBlBtn:SetSize(200, 20)
-    clearBlBtn:SetPoint("TOPLEFT", 14, y)
-    clearBlBtn:SetNormalFontObject("GameFontHighlightSmall")
-    clearBlBtn:SetText("Clear Global Blocklist (0)")
-    clearBlBtn:SetScript("OnClick", function(self)
-        wipe(ns.db.globalBlacklist)
-        self:SetText("Clear Global Blocklist (0)")
-        ns:Print("Global loot blocklist cleared.")
+    opSlider:SetScript("OnValueChanged", function(_, value)
+        if isSyncing then return end
+        local pct = math.floor(value + 0.5)
+        ns.db.timerBgAlpha = pct / 100
+        f.opValLbl:SetText(pct .. "%")
         NotifyRefresh()
     end)
-    f.clearBlBtn = clearBlBtn
-    y = y - 24
+    f.opSlider = opSlider
+    y = y - 30
 
-    AddDivider()
+    y = AddDivider(pApp, y)
+    _, y = AddHeader(pApp, "|cff00ccffWindow & Minimap|r", y)
+    y = AddCheckbox(pApp, "timerMinimap",     "Show Minimap Button", y)
+    y = AddCheckbox(pApp, "timerLocked",      "Lock Window Position & Size", y)
+    y = AddCheckbox(pApp, "compactClickThru", "Click-Through Compact Mode |cffaaaaaa(when Locked)|r", y)
 
-    -- General Section
-    AddHeader("|cff00ccffGeneral Display|r")
-    AddCheckbox("timerMinimap",    "Show Minimap Button")
-    AddCheckbox("timerLocked",     "Lock Window Position & Size")
-    AddCheckbox("showTotalGold",   "Show Net Session Profit")
-    AddCheckbox("showRepairCosts", "Show Repair Costs")
-    AddCheckbox("showXpPerHour",   "Show XP / Hour |cffaaaaaa(hidden at 60)|r")
-    AddCheckbox("showTimeToLevel", "Show Time to Level |cffaaaaaa(hidden at 60)|r")
+    -- =========================================================================
+    -- TAB 2: DISPLAY
+    -- =========================================================================
+    local pDisp = f.panels.display
+    y = -2
 
-    AddDivider()
+    _, y = AddHeader(pDisp, "|cff00ccffGeneral Stats|r", y)
+    y = AddCheckbox(pDisp, "showTotalGold",   "Show Net Session Profit", y)
+    y = AddCheckbox(pDisp, "showRepairCosts", "Show Repair Costs", y)
+    y = AddCheckbox(pDisp, "showXpPerHour",   "Show XP / Hour |cffaaaaaa(hidden at 60)|r", y)
+    y = AddCheckbox(pDisp, "showTimeToLevel", "Show Time to Level |cffaaaaaa(hidden at 60)|r", y)
+    y = AddCheckbox(pDisp, "showBagSpace",    "Show Free Bag Slots", y)
+    y = AddCheckbox(pDisp, "showGoalBar",     "Show Session Gold Goal Bar", y)
 
-    -- Dungeon Mode Section
-    AddHeader("|cff00ccffDungeon Mode Options|r")
-    AddCheckbox("timerAutoStart",     "Auto-Start Timer on Dungeon Entry")
-    AddCheckbox("showTotalRuns",      "Show Total Runs")
-    AddCheckbox("showRunsPerHour",    "Show Runs / Hour")
-    AddCheckbox("showFastestRun",     "Show Fastest Run")
-    AddCheckbox("showLockoutWarning", "Show Instance Lockout Warning (5/hr)")
-
-    AddCheckbox("showBagSpace",    "Show Free Bag Slots")
-
-    AddDivider()
-
-    -- Automation & Session Goal Section
-    AddHeader("|cff00ccffAutomation & Session Goal|r")
-    AddCheckbox("autoPauseAFK",  "Auto-Pause When AFK")
-    AddCheckbox("autoPauseCity", "Auto-Pause in Cities / Rested Areas")
-    AddCheckbox("showGoalBar",   "Show Session Gold Goal Bar")
-
-    local goalLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    goalLbl:SetPoint("TOPLEFT", 18, y - 4)
+    local goalLbl = pDisp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    goalLbl:SetPoint("TOPLEFT", 6, y - 4)
     goalLbl:SetText("Gold Goal |cffaaaaaa(e.g. 100g):|r")
 
-    local goalBox = CreateFrame("EditBox", "FarmTrackerGoalBox", f, "InputBoxTemplate")
-    goalBox:SetSize(86, 20)
-    goalBox:SetPoint("TOPRIGHT", -14, y)
+    local goalBox = CreateFrame("EditBox", "FarmTrackerGoalBox", pDisp, "InputBoxTemplate")
+    goalBox:SetSize(96, 20)
+    goalBox:SetPoint("TOPRIGHT", 0, y)
     goalBox:SetAutoFocus(false)
     goalBox:SetJustifyH("CENTER")
     goalBox:SetScript("OnEnterPressed", function(self)
-        ns.db.sessionGoalCopper = ParseThresholdInput(self:GetText())
+        ns.db.sessionGoalCopper = ParseThresholdInput(self:GetText(), ns.db.sessionGoalCopper)
         self:SetText(FormatThresholdText(ns.db.sessionGoalCopper))
         self:ClearFocus()
         NotifyRefresh()
@@ -546,15 +664,154 @@ local function CreateOptionsUI()
         self:ClearFocus()
     end)
     goalBox:SetScript("OnEditFocusLost", function(self)
-        ns.db.sessionGoalCopper = ParseThresholdInput(self:GetText())
+        ns.db.sessionGoalCopper = ParseThresholdInput(self:GetText(), ns.db.sessionGoalCopper)
         self:SetText(FormatThresholdText(ns.db.sessionGoalCopper))
         NotifyRefresh()
     end)
     f.goalBox = goalBox
     y = y - 26
 
-    f:SetHeight(math.abs(y) + 46)
+    y = AddDivider(pDisp, y)
+    _, y = AddHeader(pDisp, "|cff00ccffDungeon Mode Stats|r", y)
+    y = AddCheckbox(pDisp, "showTotalRuns",      "Show Total Runs", y)
+    y = AddCheckbox(pDisp, "showRunsPerHour",    "Show Runs / Hour", y)
+    y = AddCheckbox(pDisp, "showFastestRun",     "Show Fastest Run", y)
+    y = AddCheckbox(pDisp, "showLockoutWarning", "Show Instance Lockout Warning (5/hr)", y)
 
+    -- =========================================================================
+    -- TAB 3: LOOT & AH
+    -- =========================================================================
+    local pLoot = f.panels.loot
+    y = -4
+
+    local priceLbl = pLoot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    priceLbl:SetPoint("TOPLEFT", 0, y - 4)
+    priceLbl:SetText("AH Price Source:")
+
+    local priceBtn = CreateFrame("Button", nil, pLoot, "UIPanelButtonTemplate")
+    priceBtn:SetSize(155, 22)
+    priceBtn:SetPoint("TOPRIGHT", 0, y)
+    priceBtn:SetScript("OnClick", function(self) TogglePriceDropdown(self) end)
+    priceBtn:SetText("Auto (TSM / Auc)  v")
+    ClampButtonText(priceBtn)
+    f.priceBtn = priceBtn
+    y = y - 30
+
+    y = AddDivider(pLoot, y)
+    _, y = AddHeader(pLoot, "|cff00ccffHigh-Value Drop Alert|r", y)
+    y = AddCheckbox(pLoot, "dropAlertEnabled", "Enable High-Value Drop Alert", y)
+    y = AddCheckbox(pLoot, "dropAlertMuted",   "Mute Alert Sound |cffaaaaaa(Flash Banner Only)|r", y)
+
+    local threshLbl = pLoot:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    threshLbl:SetPoint("TOPLEFT", 4, y - 4)
+    threshLbl:SetText("Threshold |cffaaaaaa(0c = all)|r:")
+
+    local testAlertBtn = CreateFrame("Button", nil, pLoot, "UIPanelButtonTemplate")
+    testAlertBtn:SetSize(48, 20)
+    testAlertBtn:SetPoint("TOPRIGHT", 0, y)
+    testAlertBtn:SetNormalFontObject("GameFontHighlightSmall")
+    testAlertBtn:SetText("Test")
+    testAlertBtn:SetScript("OnClick", function()
+        local trackerMod = ns.Modules["Tracker"]
+        if trackerMod and trackerMod.TestDropAlert then
+            trackerMod:TestDropAlert()
+        end
+    end)
+
+    local threshBox = CreateFrame("EditBox", "FarmTrackerAlertThresholdBox", pLoot, "InputBoxTemplate")
+    threshBox:SetSize(82, 20)
+    threshBox:SetPoint("RIGHT", testAlertBtn, "LEFT", -8, 0)
+    threshBox:SetAutoFocus(false)
+    threshBox:SetJustifyH("CENTER")
+    threshBox:SetScript("OnEnterPressed", function(self)
+        ns.db.dropAlertThreshold = ParseThresholdInput(self:GetText(), ns.db.dropAlertThreshold)
+        self:SetText(FormatThresholdText(ns.db.dropAlertThreshold))
+        self:ClearFocus()
+    end)
+    threshBox:SetScript("OnEscapePressed", function(self)
+        self:SetText(FormatThresholdText(ns.db.dropAlertThreshold))
+        self:ClearFocus()
+    end)
+    threshBox:SetScript("OnEditFocusLost", function(self)
+        ns.db.dropAlertThreshold = ParseThresholdInput(self:GetText(), ns.db.dropAlertThreshold)
+        self:SetText(FormatThresholdText(ns.db.dropAlertThreshold))
+    end)
+    f.threshBox = threshBox
+    y = y - 24
+
+    local soundLbl = pLoot:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    soundLbl:SetPoint("TOPLEFT", 4, y - 4)
+    soundLbl:SetText("Alert Sound:")
+
+    local soundBtn = CreateFrame("Button", nil, pLoot, "UIPanelButtonTemplate")
+    soundBtn:SetSize(155, 20)
+    soundBtn:SetPoint("TOPRIGHT", 0, y)
+    soundBtn:SetNormalFontObject("GameFontHighlightSmall")
+    soundBtn:SetScript("OnClick", function(self) ToggleSoundDropdown(self) end)
+    soundBtn:SetText("Loot Coins  v")
+    ClampButtonText(soundBtn)
+    f.soundBtn = soundBtn
+    y = y - 26
+
+    y = AddDivider(pLoot, y)
+
+    local blHeader, nextY = AddHeader(pLoot, "|cff00ccffGlobal Blocklist|r |cffaaaaaa(0)|r", y)
+    f.blHeader = blHeader
+
+    local clearBlBtn = CreateFrame("Button", nil, pLoot, "UIPanelButtonTemplate")
+    clearBlBtn:SetSize(74, 18)
+    clearBlBtn:SetPoint("TOPRIGHT", 0, y + 2)
+    clearBlBtn:SetNormalFontObject("GameFontHighlightSmall")
+    clearBlBtn:SetText("|cffff6666Clear All|r")
+    clearBlBtn:SetScript("OnClick", function()
+        wipe(ns.db.globalBlacklist)
+        RefreshBlacklistUI()
+        ns:Print("Global loot blocklist cleared.")
+        NotifyRefresh()
+    end)
+    y = nextY - 2
+
+    local blBox = CreateFrame("Frame", nil, pLoot, "BackdropTemplate")
+    blBox:SetPoint("TOPLEFT", 0, y)
+    blBox:SetPoint("BOTTOMRIGHT", 0, 4)
+    blBox:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        tile     = false,
+        edgeSize = 1,
+    })
+    blBox:SetBackdropColor(0, 0, 0, 0.35)
+    blBox:SetBackdropBorderColor(0.25, 0.25, 0.3, 0.8)
+
+    local blScroll = CreateFrame("ScrollFrame", "FarmTrackerBlacklistScroll", blBox, "UIPanelScrollFrameTemplate")
+    blScroll:SetPoint("TOPLEFT", 4, -4)
+    blScroll:SetPoint("BOTTOMRIGHT", -24, 4)
+
+    local blScrollChild = CreateFrame("Frame", nil, blScroll)
+    blScrollChild:SetWidth(286)
+    blScrollChild:SetHeight(1)
+    blScroll:SetScrollChild(blScrollChild)
+    f.blScrollChild = blScrollChild
+
+    local blEmpty = blBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    blEmpty:SetPoint("CENTER", 0, 0)
+    blEmpty:SetText("Right-click any item in the Loot Window to blacklist it.")
+    f.blEmpty = blEmpty
+
+    -- =========================================================================
+    -- TAB 4: AUTOMATION
+    -- =========================================================================
+    local pAuto = f.panels.auto
+    y = -2
+
+    _, y = AddHeader(pAuto, "|cff00ccffTimer Automation|r", y)
+    y = AddCheckbox(pAuto, "timerAutoStart",   "Auto-Start Timer on Dungeon Entry", y)
+    y = AddCheckbox(pAuto, "autoPauseAFK",     "Auto-Pause When Flagged AFK", y)
+    y = AddCheckbox(pAuto, "autoPauseCity",    "Auto-Pause in Cities / Rested Areas", y)
+    y = AddCheckbox(pAuto, "autoResume",       "Auto-Resume When Leaving AFK / City", y)
+    y = AddCheckbox(pAuto, "autoResumeCombat", "Auto-Resume on Entering Combat", y)
+
+    -- Close Button
     local doneBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     doneBtn:SetSize(100, 22)
     doneBtn:SetPoint("BOTTOM", 0, 12)
@@ -563,7 +820,8 @@ local function CreateOptionsUI()
 
     f:Hide()
     optFrame = f
-    ApplyOptionsTheme(f)
+    ns.Utils.ApplyBackdropTheme(f, false, false)
+    SelectTab("appearance")
     return f
 end
 
@@ -584,9 +842,7 @@ end
 
 function mod:SyncBlacklistCount()
     if not optFrame or not optFrame:IsShown() then return end
-    if optFrame.clearBlBtn then
-        optFrame.clearBlBtn:SetText("Clear Global Blocklist (" .. CountBlacklist() .. ")")
-    end
+    RefreshBlacklistUI()
 end
 
 function mod:ToggleUI()
@@ -594,28 +850,35 @@ function mod:ToggleUI()
     if f:IsShown() then
         f:Hide()
     else
-        ApplyOptionsTheme(f)
+        ns.Utils.ApplyBackdropTheme(f, false, false)
         f.themeBtn:SetText(ns.db.timerTheme == "classic" and "WoW Forever" or "Dark Modern")
         f.fontBtn:SetText((ns.db.timerFont or "Friz Quadrata") .. "  v")
         f.priceBtn:SetText(GetPriceSourceLabel(ns.db.ahPriceSource or "AUTO") .. "  v")
+        f.soundBtn:SetText(GetAlertSoundLabel(ns.db.dropAlertSound or "COIN") .. "  v")
         f.threshBox:SetText(FormatThresholdText(ns.db.dropAlertThreshold))
         f.goalBox:SetText(FormatThresholdText(ns.db.sessionGoalCopper))
-        f.clearBlBtn:SetText("Clear Global Blocklist (" .. CountBlacklist() .. ")")
 
         local px = tonumber(ns.db.timerFontSize) or 11
         if px < 8 then px = 8 elseif px > 64 then px = 64 end
+        local pct = math.floor(((tonumber(ns.db.timerBgAlpha) or 0.92) * 100) + 0.5)
+        if pct < 10 then pct = 10 elseif pct > 100 then pct = 100 end
+
         f:SetSyncing(true)
         f.slider:SetValue(px)
         f.sizeValLbl:SetText(px .. "px")
+        f.opSlider:SetValue(pct)
+        f.opValLbl:SetText(pct .. "%")
         f:SetSyncing(false)
 
         for key, cb in pairs(f.checks) do
             cb:SetChecked(ns.db[key] == true)
         end
+
+        RefreshBlacklistUI()
         f:Show()
     end
 end
 
 function mod:OnInit()
-    -- Options frame is created lazily on first open
+    -- Created lazily on first open
 end

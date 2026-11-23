@@ -20,40 +20,41 @@ ns.Defaults = {
     timerTheme         = "dark",            -- "dark" or "classic"
     timerFont          = "Friz Quadrata",
     timerFontSize      = 11,                -- 8 - 64 px
+    timerBgAlpha       = 0.92,              -- 0.10 - 1.00 background opacity
     timerAutoStart     = true,
     timerLocked        = false,
+    compactClickThru   = false,             -- click-through Compact Mode when locked
     timerMinimap       = true,
     timerMinimapAngle  = 220,
     timerPos           = { point = "CENTER", x = 0, y = 120 },
 
+    -- Pricing, Alerts & Blocklist
+    ahPriceSource      = "AUTO",            -- AUTO, TSM_MIN, TSM_MARKET, TSM_HIST, AUCTIONATOR, VENDOR
+    dropAlertEnabled   = true,
+    dropAlertMuted     = false,
+    dropAlertSound     = "COIN",            -- COIN, PING, WHISPER, READY, QUEST, RAID_WARN
+    dropAlertThreshold = 20000,             -- 2g default (0 = alert on every drop)
+    globalBlacklist    = {},
+
     -- UI Element Toggles
     showTotalGold      = true,
+    showRepairCosts    = true,
     showXpPerHour      = true,
     showTimeToLevel    = true,
     showTotalRuns      = true,
     showRunsPerHour    = true,
     showFastestRun     = true,
     showLockoutWarning = true,
+    showBagSpace       = true,
     compactMode        = false,
 
-    -- Pricing Alerts & Blocklists
-    ahPriceSource      = "AUTO",            -- AUTO, TSM_MIN, TSM_MARKET, TSM_HIST, AUCTIONATOR, VENDOR
-    dropAlertEnabled   = true,
-    dropAlertThreshold = 20000,             -- 2g default (0 = alert on every drop)
-    globalBlacklist    = {},
-
-    -- Bags
-    showBagSpace       = true,
-
-    -- Timer automation
+    -- Automation & Session Goal
     autoPauseAFK       = true,
     autoPauseCity      = true,
-
-    -- Progress bar
+    autoResume         = true,
+    autoResumeCombat   = false,
     showGoalBar        = true,
-    sessionGoalCopper  = 10000000 -- 100g default
-
-
+    sessionGoalCopper  = 1000000,           -- 100g default
 }
 
 function ns:RegisterModule(name, tbl)

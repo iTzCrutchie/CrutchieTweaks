@@ -80,9 +80,9 @@ function mod:OnInit()
 
     btn:SetScript("OnClick", function(_, mouseBtn)
         if mouseBtn == "LeftButton" then
-            local timerMod = ns.Modules["FarmTimer"]
-            if timerMod and timerMod.ToggleUI then
-                timerMod:ToggleUI()
+            local trackerMod = ns.Modules["Tracker"]
+            if trackerMod and trackerMod.ToggleUI then
+                trackerMod:ToggleUI()
             end
         elseif mouseBtn == "RightButton" then
             local optMod = ns.Modules["Options"]
