@@ -3,6 +3,18 @@
 ### `CHANGELOG.md`
 
 ```markdown
+## [0.0.7] - 2026-11-26
+
+### Added
+* **Added Profiles and per character setting and sessions. Will no longer carry sessions over to other characters. Profiles added to keep UI theming across multiiple characters/profiles
+
+### Fixed
+* Fixed the post button on the tracker
+* Fixed left clicking on a log in the history UI
+
+## Removed
+* Removed repair costs and repairs calculated into profits. Just was not viable to try to keep track of
+
 
 ## [0.0.6] - 2026-11-23
 

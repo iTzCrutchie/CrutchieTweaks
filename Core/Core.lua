@@ -1,69 +1,59 @@
 local addonName, ns = ...
 
-local function ApplyDefaults(db, defaults)
-    for k, v in pairs(defaults) do
-        if db[k] == nil then
-            if type(v) == "table" then
-                db[k] = {}
-                ApplyDefaults(db[k], v)
-            else
-                db[k] = v
-            end
-        end
-    end
-end
-
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_LOGOUT")
 
-eventFrame:SetScript("OnEvent", function(self, event, arg1)
+eventFrame:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         FarmTrackerDB = FarmTrackerDB or {}
-        ApplyDefaults(FarmTrackerDB, ns.Defaults)
+        for k, v in pairs(ns.Defaults) do
+            if FarmTrackerDB[k] == nil then
+                FarmTrackerDB[k] = v
+            end
+        end
         ns.db = FarmTrackerDB
-        self:UnregisterEvent("ADDON_LOADED")
 
     elseif event == "PLAYER_LOGIN" then
+        if ns.Profiles and ns.Profiles.OnInit then
+            ns.Profiles:OnInit()
+        end
+
         local hasErrors = false
-        for name, mod in pairs(ns.Modules) do
-            if type(mod.OnInit) == "function" then
-                local ok, err = pcall(mod.OnInit, mod)
+        for name, module in pairs(ns.Modules) do
+            if name ~= "Profiles" and module.OnInit then
+                local ok, err = pcall(module.OnInit, module)
                 if not ok then
                     hasErrors = true
-                    ns:Print(ns.Colors.red .. "Error loading module '" .. name .. "': " .. tostring(err) .. ns.Colors.reset)
+                    ns:Print(ns.Colors.red .. "Error loading module [" .. name .. "]: " .. tostring(err) .. ns.Colors.reset)
                 end
             end
         end
 
         if not hasErrors then
-            ns:Print(ns.Colors.green .. "by Crutchie loaded successfully. " .. ns.Colors.reset .. "Type /ft for options.")
+            ns:Print(ns.Colors.green .. "Loaded successfully. Type /ft for options." .. ns.Colors.reset)
         else
-            ns:Print(ns.Colors.red .. "Loaded with error." .. ns.Colors.reset)
+            ns:Print(ns.Colors.red .. "Loaded with errors." .. ns.Colors.reset)
         end
-        self:UnregisterEvent("PLAYER_LOGIN")
+
+    elseif event == "PLAYER_LOGOUT" then
+        if ns.Profiles and ns.Profiles.SyncCurrentProfileFromDB then
+            ns.Profiles.SyncCurrentProfileFromDB()
+        end
     end
 end)
 
--- Slash Commands (/ft or /farmtracker)
 SLASH_FARMTRACKER1 = "/ft"
 SLASH_FARMTRACKER2 = "/farmtracker"
 
 SlashCmdList["FARMTRACKER"] = function(msg)
-    local cmd = string.lower(string.match(msg or "", "^%s*(%S*)") or "")
+    local cmd = string.lower(strtrim(msg or ""))
 
     if cmd == "" or cmd == "timer" or cmd == "t" then
-        local timerMod = ns.Modules["Tracker"]
-        if timerMod and timerMod.ToggleUI then
-            timerMod:ToggleUI()
-        end
-        return
-    end
-
-    if cmd == "history" or cmd == "hist" or cmd == "log" then
-        local histMod = ns.Modules["History"]
-        if histMod and histMod.ToggleUI then
-            histMod:ToggleUI()
+        local trkMod = ns.Modules["Tracker"]
+        if trkMod and trkMod.ToggleUI then
+            trkMod:ToggleUI()
         end
         return
     end
@@ -76,7 +66,15 @@ SlashCmdList["FARMTRACKER"] = function(msg)
         return
     end
 
-    if cmd == "config" or cmd == "options" or cmd == "menu" then
+    if cmd == "history" or cmd == "hist" then
+        local histMod = ns.Modules["History"]
+        if histMod and histMod.ToggleUI then
+            histMod:ToggleUI()
+        end
+        return
+    end
+
+    if cmd == "config" or cmd == "menu" or cmd == "options" then
         local optMod = ns.Modules["Options"]
         if optMod and optMod.ToggleUI then
             optMod:ToggleUI()
@@ -85,37 +83,26 @@ SlashCmdList["FARMTRACKER"] = function(msg)
     end
 
     if cmd == "testalert" then
-        local timerMod = ns.Modules["Tracker"]
-        if timerMod and timerMod.TestDropAlert then
-            timerMod:TestDropAlert()
+        local trkMod = ns.Modules["Tracker"]
+        if trkMod and trkMod.TestDropAlert then
+            trkMod:TestDropAlert()
         end
         return
     end
 
     if cmd == "debug" then
-        local timerMod = ns.Modules["Tracker"]
-        if timerMod and timerMod.ToggleDebug then
-            timerMod:ToggleDebug()
+        local trkMod = ns.Modules["Tracker"]
+        if trkMod and trkMod.ToggleDebug then
+            trkMod:ToggleDebug()
         end
         return
     end
 
     ns:Print("Commands:")
-    print("  |cffffff00/ft|r (or |cffffff00/ft timer|r) - Toggle Farm Tracker window.")
-    print("  |cffffff00/ft history|r - Open Session History log.")
-    print("  |cffffff00/ft farms|r - Open the farm finder window to show best GPH farms")
-    print("  |cffffff00/ft config|r - Open Settings menu.")
-    print("  |cffffff00/ft testalert|r - Preview the High-Value Drop Alert.")
-    print("  |cffffff00/ft debug|r - Toggle loot/coin debug output.")
-end
-
--- Key Bindings Labels
-BINDING_HEADER_FARMTRACKER          = "Farm Tracker"
-BINDING_NAME_FARMTRACKER_TOGGLE     = "Toggle Tracker Window"
-BINDING_NAME_FARMTRACKER_STARTPAUSE = "Start / Pause Timer"
-BINDING_NAME_FARMTRACKER_NEWRUN     = "Start New Dungeon Run"
-BINDING_NAME_FARMTRACKER_COMPACT    = "Toggle Compact Mode"
-
-function FarmTracker_GetTracker()
-    return ns.Modules["Tracker"]
+    DEFAULT_CHAT_FRAME:AddMessage("  |cffffff00/ft|r or |cffffff00/ft timer|r - Toggle Farm Tracker window.")
+    DEFAULT_CHAT_FRAME:AddMessage("  |cffffff00/ft farms|r - Open Farm Finder.")
+    DEFAULT_CHAT_FRAME:AddMessage("  |cffffff00/ft history|r - Open Session History.")
+    DEFAULT_CHAT_FRAME:AddMessage("  |cffffff00/ft config|r - Open Settings & Profiles.")
+    DEFAULT_CHAT_FRAME:AddMessage("  |cffffff00/ft testalert|r - Preview high-value drop alert.")
+    DEFAULT_CHAT_FRAME:AddMessage("  |cffffff00/ft debug|r - Toggle loot/coin debug output.")
 end

@@ -6,42 +6,43 @@ ns.Tracker = mod
 local BASE_FONT_SIZE = 11
 local BASE_WIDTH     = 276
 
-local state = {
-    isRunning      = false,
-    isShown        = false,
-    sessionTime    = 0,
-    runTime        = 0,
-    lastRunTime    = nil,
-    fastestRunTime = nil,
-    runCount       = 1,
-    completedRuns  = 0,
-    rawCopper      = 0,
-    vendorCopper   = 0,
-    ahCopper       = 0,
-    sessionXP      = 0,
-    lastSaveTime   = nil,
-    lootLog        = {},
-    sessionIgnored = {},
-    runTimestamps  = {},
-}
+local function CreateDefaultSessionState()
+    return {
+        isRunning      = false,
+        isShown        = false,
+        sessionTime    = 0,
+        runTime        = 0,
+        lastRunTime    = nil,
+        fastestRunTime = nil,
+        runCount       = 1,
+        completedRuns  = 0,
+        rawCopper      = 0,
+        vendorCopper   = 0,
+        ahCopper       = 0,
+        sessionXP      = 0,
+        lastSaveTime   = nil,
+        lootLog        = {},
+        sessionIgnored = {},
+        runTimestamps  = {},
+    }
+end
+
+local state = CreateDefaultSessionState()
 
 local OPENABLE_CONTAINERS = {
     [5523]  = true, [5524]  = true, [7973]  = true, [15874] = true,
     [24476] = true, [36781] = true, [45909] = true, [52340] = true,
 }
 
-local debugMode             = false
-local uiFrame               = nil
-local postMenu              = nil
-local pendingItems          = {}
-local wasInDungeon          = false
-local autoPausedReason      = nil
-local lastXP                = 0
-local lastXPMax             = 0
-local lastLevel             = 0
-local lastMoney             = 0
-local pendingMoneySpent     = 0
-local pendingMoneyTime      = 0
+local debugMode        = false
+local uiFrame          = nil
+local postMenu         = nil
+local pendingItems     = {}
+local wasInDungeon     = false
+local autoPausedReason = nil
+local lastXP           = 0
+local lastXPMax        = 0
+local lastLevel        = 0
 
 local function DebugPrint(msg)
     if debugMode then
@@ -49,15 +50,37 @@ local function DebugPrint(msg)
     end
 end
 
+local function GetCharSessionTable()
+    FarmTrackerDB.charSessions = FarmTrackerDB.charSessions or {}
+    local key = ns.Utils.GetCharacterKey()
+    if type(FarmTrackerDB.charSessions[key]) ~= "table" then
+        FarmTrackerDB.charSessions[key] = CreateDefaultSessionState()
+    end
+    return FarmTrackerDB.charSessions[key]
+end
+
+local function ResetCurrentCharSessionState()
+    local fresh = CreateDefaultSessionState()
+    fresh.lastSaveTime = GetTime()
+    local charDB = GetCharSessionTable()
+    for k in pairs(charDB) do
+        charDB[k] = nil
+    end
+    for k, v in pairs(fresh) do
+        charDB[k] = v
+    end
+    state = charDB
+end
+
 function mod:GetState()
     return state
 end
 
 local function InitSavedState()
-    FarmTrackerDB.timerState = FarmTrackerDB.timerState or {}
-    local saved = FarmTrackerDB.timerState
+    local saved = GetCharSessionTable()
+    local defaults = CreateDefaultSessionState()
 
-    for k, defaultVal in pairs(state) do
+    for k, defaultVal in pairs(defaults) do
         if saved[k] == nil then
             saved[k] = (type(defaultVal) == "table") and {} or defaultVal
         end
@@ -312,9 +335,9 @@ local function ApplyLayoutMode()
     PlaceRow(uiFrame.rows.fastRun,   dungeonMode and ns.db.showFastestRun ~= false)
     PlaceRow(uiFrame.rows.lockout,   dungeonMode and ns.db.showLockoutWarning ~= false)
 
-    PlaceRow(uiFrame.rows.raw,     true)
-    PlaceRow(uiFrame.rows.vendor,  true)
-    PlaceRow(uiFrame.rows.ah,      ns.Pricing.HasAnyAHAddon())
+    PlaceRow(uiFrame.rows.raw,    true)
+    PlaceRow(uiFrame.rows.vendor, true)
+    PlaceRow(uiFrame.rows.ah,     ns.Pricing.HasAnyAHAddon())
 
     y = y - 2
     uiFrame.div3:ClearAllPoints()
@@ -351,19 +374,19 @@ end
 local function UpdateDisplay()
     if not uiFrame or not uiFrame:IsShown() then return end
 
-    local Utils        = ns.Utils
-    local Pricing      = ns.Pricing
-    local useVendor    = Pricing.IsVendorOnlyMode()
-    local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
-    local netCopper    = (state.rawCopper + itemTotal)
-    local gphCopper    = 0
-    local rph          = 0
-    local xph          = 0
+    local Utils     = ns.Utils
+    local Pricing   = ns.Pricing
+    local useVendor = Pricing.IsVendorOnlyMode()
+    local itemTotal = useVendor and state.vendorCopper or state.ahCopper
+    local netCopper = (state.rawCopper or 0) + itemTotal
+    local gphCopper = 0
+    local rph       = 0
+    local xph       = 0
 
     if state.sessionTime >= 1 then
         local sessionHours = state.sessionTime / 3600
         gphCopper = netCopper / sessionHours
-        rph       = state.completedRuns / sessionHours
+        rph       = (state.completedRuns or 0) / sessionHours
         xph       = (state.sessionXP or 0) / sessionHours
     end
 
@@ -514,10 +537,11 @@ local function SaveCurrentSessionToHistory()
     if not (histMod and histMod.SaveSession) then return end
 
     local useVendor    = ns.Pricing.IsVendorOnlyMode()
-    local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
-    local netCopper    = (state.rawCopper + itemTotal)
+    local itemTotal    = useVendor and (state.vendorCopper or 0) or (state.ahCopper or 0)
+    local netCopper    = (state.rawCopper or 0) + itemTotal
     local sessionHours = state.sessionTime / 3600
     local gphCopper    = (sessionHours > 0) and (netCopper / sessionHours) or 0
+
     local itemCounts = {}
     for _, entry in pairs(state.lootLog) do
         if entry.itemID and (entry.count or 0) > 0 and not ns.Pricing.IsItemBlocked(entry.itemID, state.sessionIgnored) then
@@ -529,7 +553,7 @@ local function SaveCurrentSessionToHistory()
         timestamp    = time(),
         dateStr      = date("%m/%d %H:%M"),
         zone         = GetRealZoneText() or "Unknown",
-        charName     = UnitName("player") or "",
+        charName     = ns.Utils.GetCharacterKey(),
         duration     = state.sessionTime,
         dungeonMode  = IsDungeonMode(),
         runs         = state.completedRuns or 0,
@@ -538,41 +562,41 @@ local function SaveCurrentSessionToHistory()
         ahCopper     = state.ahCopper or 0,
         netCopper    = netCopper,
         gphCopper    = gphCopper,
-        items        = itemCounts,
         modeTag      = useVendor and "Vendor" or "AH",
         sessionXP    = state.sessionXP or 0,
+        items        = itemCounts,
     })
 end
 
-local function BuildSummaryString()
+local function BuildSummaryText()
     local Utils        = ns.Utils
     local useVendor    = ns.Pricing.IsVendorOnlyMode()
-    local itemTotal    = useVendor and state.vendorCopper or state.ahCopper
+    local itemTotal    = useVendor and (state.vendorCopper or 0) or (state.ahCopper or 0)
     local modeTag      = useVendor and "Vendor" or "AH"
-    local netCopper    = (state.rawCopper + itemTotal)
-    local sessionHours = (state.sessionTime >= 1) and (state.sessionTime / 3600) or 0
+    local netCopper    = (state.rawCopper or 0) + itemTotal
+    local sessionHours = ((state.sessionTime or 0) >= 1) and ((state.sessionTime or 0) / 3600) or 0
     local gphCopper    = (sessionHours > 0) and (netCopper / sessionHours) or 0
-    local rph          = (sessionHours > 0) and (state.completedRuns / sessionHours) or 0
+    local rph          = (sessionHours > 0) and ((state.completedRuns or 0) / sessionHours) or 0
     local zoneName     = GetRealZoneText() or "Farm Run"
 
     local runInfo = ""
     if IsDungeonMode() then
         local lastStr = state.lastRunTime and (", Last: " .. Utils.FormatTime(state.lastRunTime)) or ""
         local fastStr = state.fastestRunTime and (", Best: " .. Utils.FormatTime(state.fastestRunTime)) or ""
-        runInfo = string.format(" [Runs: %d (%.1f/hr)%s%s]", state.completedRuns, rph, lastStr, fastStr)
+        runInfo = string.format(" [Runs: %d (%.1f/hr)%s%s]", state.completedRuns or 0, rph, lastStr, fastStr)
     end
 
     return string.format(
-        "[Farm Tracker] %s - Session: %s%s // Net (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s%s",
-        zoneName,
-        Utils.FormatTime(state.sessionTime),
-        runInfo,
-        modeTag,
-        Utils.FormatMoneyPlain(netCopper),
-        Utils.FormatMoneyPlain(gphCopper),
-        Utils.FormatMoneyPlain(state.rawCopper),
-        Utils.FormatMoneyPlain(state.vendorCopper),
-        Utils.FormatMoneyPlain(state.ahCopper)
+        "[Farm Tracker] %s - Session: %s%s // Net (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s",
+        tostring(zoneName),
+        tostring(Utils.FormatTime(state.sessionTime or 0)),
+        tostring(runInfo),
+        tostring(modeTag),
+        tostring(Utils.FormatMoneyPlain(netCopper)),
+        tostring(Utils.FormatMoneyPlain(gphCopper)),
+        tostring(Utils.FormatMoneyPlain(state.rawCopper or 0)),
+        tostring(Utils.FormatMoneyPlain(state.vendorCopper or 0)),
+        tostring(Utils.FormatMoneyPlain(state.ahCopper or 0))
     )
 end
 
@@ -585,7 +609,25 @@ local function SendSummaryToChannel(chatType)
         ns:Print(ns.Colors.red .. "You are not currently in a guild." .. ns.Colors.reset)
         return
     end
-    SendChatMessage(BuildSummaryString(), chatType)
+
+    local prefix = "/s "
+    if chatType == "PARTY" then
+        prefix = "/p "
+    elseif chatType == "GUILD" then
+        prefix = "/g "
+    end
+
+    local fullText = prefix .. BuildSummaryText()
+
+    if ChatFrame_OpenChat then
+        ChatFrame_OpenChat(fullText)
+    elseif ChatEdit_ChooseBoxForSend and ChatEdit_ActivateChat then
+        local editBox = ChatEdit_ChooseBoxForSend()
+        ChatEdit_ActivateChat(editBox)
+        editBox:SetText(fullText)
+    else
+        ns.Utils.ShowCopyPopup(BuildSummaryText(), "|cff00ccffCopy Summary|r")
+    end
 end
 
 local function TogglePostMenu(anchorBtn)
@@ -616,7 +658,7 @@ local function TogglePostMenu(anchorBtn)
         MakeChannelBtn("|cffaaaaffParty (/p)|r", -47, function() SendSummaryToChannel("PARTY") end)
         MakeChannelBtn("|cff40ff40Guild (/g)|r", -70, function() SendSummaryToChannel("GUILD") end)
         MakeChannelBtn("|cffffd700Copy (Ctrl+C)|r", -93, function()
-            ns.Utils.ShowCopyPopup(BuildSummaryString(), "|cff00ccffCopy Live Summary|r")
+            ns.Utils.ShowCopyPopup(BuildSummaryText(), "|cff00ccffCopy Live Summary|r")
         end)
         MakeChannelBtn("|cffff6666Cancel|r", -118, nil)
 
@@ -666,7 +708,6 @@ local function CreateTimerUI()
         end
     end)
 
-    -- Header Bar
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", 10, -8)
     title:SetText("|cff00ccffFarm|r Tracker")
@@ -935,30 +976,14 @@ local function CreateTimerUI()
     end
 
     f.startBtn = CreateActionButton("|cff00ff00Start|r", 80, 10, function()
-        autoPausedReason = nil
-        state.isRunning  = not state.isRunning
-        if state.isRunning then state.lastSaveTime = GetTime() end
-        UpdateDisplay()
+        mod:ToggleStartPause()
     end)
 
     f.resetBtn = CreateActionButton("Reset", 80, 98, function()
         SaveCurrentSessionToHistory()
-        autoPausedReason     = nil
-        state.isRunning      = false
-        state.sessionTime    = 0
-        state.runTime        = 0
-        state.lastRunTime    = nil
-        state.fastestRunTime = nil
-        state.runCount       = 1
-        state.completedRuns  = 0
-        state.rawCopper      = 0
-        state.vendorCopper   = 0
-        state.ahCopper       = 0
-        state.sessionXP      = 0
-        state.lastSaveTime   = GetTime()
-        wipe(state.lootLog)
-        wipe(state.sessionIgnored)
+        ResetCurrentCharSessionState()
         wipe(pendingItems)
+        autoPausedReason = nil
         if postMenu then postMenu:Hide() end
         if ns.LootWindow then
             ns.LootWindow:HideMenus()
@@ -1137,10 +1162,9 @@ function mod:OnInit()
     InitSavedState()
     CreateTimerUI()
 
-    lastXP         = UnitXP("player") or 0
-    lastXPMax      = UnitXPMax("player") or 0
-    lastLevel      = UnitLevel("player") or 1
-    lastMoney      = GetMoney() or 0
+    lastXP    = UnitXP("player") or 0
+    lastXPMax = UnitXPMax("player") or 0
+    lastLevel = UnitLevel("player") or 1
 
     local tracker = CreateFrame("Frame")
     tracker:RegisterEvent("CHAT_MSG_MONEY")
@@ -1151,14 +1175,13 @@ function mod:OnInit()
     tracker:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     tracker:RegisterEvent("PLAYER_XP_UPDATE")
     tracker:RegisterEvent("PLAYER_LEVEL_UP")
-    tracker:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
     tracker:RegisterEvent("BAG_UPDATE_DELAYED")
     tracker:RegisterEvent("PLAYER_FLAGS_CHANGED")
     tracker:RegisterEvent("PLAYER_UPDATE_RESTING")
     tracker:RegisterEvent("PLAYER_REGEN_DISABLED")
     tracker:RegisterEvent("PLAYER_LOGOUT")
 
-    tracker:SetScript("OnEvent", function(_, event, arg1, arg2)
+    tracker:SetScript("OnEvent", function(_, event, arg1)
         if event == "PLAYER_LOGOUT" then
             state.lastSaveTime = GetTime()
 

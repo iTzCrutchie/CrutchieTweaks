@@ -131,9 +131,9 @@ function mod:RefreshList()
             row:SetScript("OnClick", function(self)
                 local e = self.entryData
                 if not e then return end
-                local runStr    = (e.runs or 0) > 0 and (" // Runs: " .. e.runs) or ""
+                local runStr = (e.runs or 0) > 0 and (" // Runs: " .. e.runs) or ""
                 local text = string.format(
-                    "[Farm Tracker] %s (%s) - Time: %s%s // Net (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s%s",
+                    "[Farm Tracker] %s (%s) - Time: %s%s // Net (%s+Raw): %s (%s/hr) // Raw: %s // Vendor: %s // AH/Est: %s",
                     e.zone or "Unknown",
                     e.dateStr or "",
                     Utils.FormatDuration(e.duration),

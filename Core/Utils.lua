@@ -3,6 +3,10 @@ local _, ns = ...
 local Utils = {}
 ns.Utils = Utils
 
+function Utils.GetCharacterKey()
+    return UnitName("player") or "Unknown"
+end
+
 function Utils.SafeGetItemInfo(item)
     if _G.C_Item and _G.C_Item.GetItemInfo then
         return _G.C_Item.GetItemInfo(item)
