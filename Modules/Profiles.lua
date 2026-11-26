@@ -24,6 +24,9 @@ local PROFILE_KEYS = {
     "dropAlertThreshold",
     "dropAlertSound",
     "showGoalBar",
+    "goalBarTexture",
+    "goalBarColorMode",
+    "goalBarColor",
     "sessionGoalCopper",
     "showTotalGold",
     "showTotalRuns",
@@ -39,6 +42,7 @@ local PROFILE_KEYS = {
     "autoResume",
     "autoResumeCombat",
     "globalBlacklist",
+    "timerWindowScale",
 }
 
 local function CloneValue(val)

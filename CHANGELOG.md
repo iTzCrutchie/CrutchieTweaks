@@ -3,6 +3,15 @@
 ### `CHANGELOG.md`
 
 ```markdown
+## [0.0.8] - 
+
+### Fixed
+* Added the blockist feature to remove individual items back into the options menu
+
+### Changed
+* Changed most sliders to a text box for fine tuned control over the options
+
+
 ## [0.0.7] - 2026-11-26
 
 ### Added

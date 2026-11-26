@@ -37,6 +37,7 @@ ns.Defaults = {
     globalBlacklist    = {},
 
     -- UI Element Toggles
+    timerWindowScale   = 100, -- Percentage (100 = 1.0x scale)
     showTotalGold      = true,
     showXpPerHour      = true,
     showTimeToLevel    = true,
@@ -53,6 +54,9 @@ ns.Defaults = {
     autoResume         = true,
     autoResumeCombat   = false,
     showGoalBar        = true,
+    goalBarTexture     = "Blizzard",
+    goalBarColorMode   = "solid", -- "solid" or "completion"
+    goalBarColor       = { r = 0.0, g = 0.72, b = 0.95 },
     sessionGoalCopper  = 1000000,           -- 100g default
 }
 

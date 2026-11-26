@@ -149,6 +149,59 @@ function Utils.GetSelectedFontPath()
     return STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
 end
 
+function Utils.GetAvailableBarTextures()
+    local textures = {}
+    local seen = {}
+
+    local function AddTex(name, path)
+        if name and path and not seen[name] then
+            seen[name] = true
+            table.insert(textures, { name = name, path = path })
+        end
+    end
+
+    AddTex("Blizzard",           "Interface\\TargetingFrame\\UI-StatusBar")
+    AddTex("Blizzard Raid",      "Interface\\RaidFrame\\Raid-Bar-Hp-Fill")
+    AddTex("Blizzard Skill",     "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar")
+    AddTex("Flat (Solid)",       "Interface\\Buttons\\WHITE8x8")
+
+    -- Pull from LibSharedMedia-3.0 (includes SharedMedia, Atrocity, etc.)
+    local lsm = _G.LibStub and _G.LibStub("LibSharedMedia-3.0", true)
+    if lsm and lsm.List and lsm.Fetch then
+        for _, name in ipairs(lsm:List("statusbar")) do
+            local path = lsm:Fetch("statusbar", name, true)
+            if path then
+                AddTex(name, path)
+            end
+        end
+    end
+
+    -- Pull directly from EllesmereUI if loaded
+    if _G.EllesmereUI and type(_G.EllesmereUI.BAR_TEXTURE_FILES) == "table" then
+        local names = _G.EllesmereUI.BAR_TEXTURE_NAMES or {}
+        for key, path in pairs(_G.EllesmereUI.BAR_TEXTURE_FILES) do
+            local label = names[key] or tostring(key)
+            AddTex(label, path)
+        end
+    end
+
+    table.sort(textures, function(a, b)
+        return a.name:lower() < b.name:lower()
+    end)
+
+    return textures
+end
+
+function Utils.GetSelectedBarTexturePath()
+    local target = ns.db and ns.db.goalBarTexture or "Blizzard"
+    for _, info in ipairs(Utils.GetAvailableBarTextures()) do
+        if info.name == target then
+            return info.path
+        end
+    end
+    return "Interface\\TargetingFrame\\UI-StatusBar"
+end
+
 function Utils.ApplyBackdropTheme(frame, isTab, useCustomAlpha)
     if not frame or not frame.SetBackdrop then return end
     local alpha = (useCustomAlpha and ns.db and tonumber(ns.db.timerBgAlpha)) or nil

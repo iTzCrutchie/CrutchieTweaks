@@ -161,6 +161,9 @@ local function ApplyTheme()
     Utils.ApplyBackdropTheme(uiFrame and uiFrame.lootToggleBtn, true, true)
     Utils.ApplyBackdropTheme(postMenu, false, false)
     if ns.LootWindow then ns.LootWindow:ApplyTheme() end
+    if uiFrame and uiFrame.goalBar then
+        uiFrame.goalBar:SetStatusBarTexture(Utils.GetSelectedBarTexturePath())
+    end
 end
 
 local function ApplyLockState()
@@ -188,28 +191,42 @@ end
 local function ApplyFontSize()
     if not uiFrame then return end
 
-    local targetPx = tonumber(ns.db.timerFontSize) or BASE_FONT_SIZE
-    if targetPx < 8 then targetPx = 8 elseif targetPx > 64 then targetPx = 64 end
+    local fontSize = tonumber(ns.db.timerFontSize) or BASE_FONT_SIZE
+    if fontSize < 6 then fontSize = 6 elseif fontSize > 72 then fontSize = 72 end
+
+    local scalePct = tonumber(ns.db.timerWindowScale) or 100
+    if scalePct < 30 then scalePct = 30 elseif scalePct > 300 then scalePct = 300 end
 
     local fontPath = ns.Utils.GetSelectedFontPath()
 
-    uiFrame.title:SetFont(fontPath, 13, "OUTLINE")
-    uiFrame.sessionTimerText:SetFont(fontPath, 16, "OUTLINE")
-    uiFrame.runTimerText:SetFont(fontPath, 16, "OUTLINE")
-    uiFrame.sessionLabel:SetFont(fontPath, 11, "")
-    uiFrame.runLabel:SetFont(fontPath, 11, "")
-    uiFrame.valModeLbl:SetFont(fontPath, 11, "")
-    if uiFrame.compactText then uiFrame.compactText:SetFont(fontPath, 12, "OUTLINE") end
-    if uiFrame.goalBar and uiFrame.goalBar.text then uiFrame.goalBar.text:SetFont(fontPath, 10, "OUTLINE") end
+    uiFrame.title:SetFont(fontPath, fontSize + 2, "OUTLINE")
+    uiFrame.sessionTimerText:SetFont(fontPath, fontSize + 5, "OUTLINE")
+    uiFrame.runTimerText:SetFont(fontPath, fontSize + 5, "OUTLINE")
+    uiFrame.sessionLabel:SetFont(fontPath, fontSize, "")
+    uiFrame.runLabel:SetFont(fontPath, fontSize, "")
+    uiFrame.valModeLbl:SetFont(fontPath, fontSize, "")
+    if uiFrame.compactText then uiFrame.compactText:SetFont(fontPath, fontSize + 1, "OUTLINE") end
+    if uiFrame.goalBar and uiFrame.goalBar.text then
+        uiFrame.goalBar.text:SetFont(fontPath, math.max(8, fontSize - 1), "OUTLINE")
+    end
 
     for _, row in ipairs(uiFrame.allStatRows) do
-        row.lbl:SetFont(fontPath, 11, "")
-        row.val:SetFont(fontPath, 11, "")
+        row.lbl:SetFont(fontPath, fontSize, "")
+        row.val:SetFont(fontPath, fontSize, "")
     end
 
     if ns.LootWindow then ns.LootWindow:ApplyFont(fontPath) end
 
-    local newScale = targetPx / BASE_FONT_SIZE
+    -- Auto-expand window width if the chosen font size is larger than base
+    local requiredWidth = math.max(BASE_WIDTH, math.floor(BASE_WIDTH * (fontSize / BASE_FONT_SIZE) + 0.5))
+    uiFrame:SetWidth(requiredWidth)
+    if uiFrame.div1 then uiFrame.div1:SetWidth(requiredWidth - 20) end
+    if uiFrame.div2 then uiFrame.div2:SetWidth(requiredWidth - 20) end
+    if uiFrame.div3 then uiFrame.div3:SetWidth(requiredWidth - 20) end
+    if uiFrame.goalBar then uiFrame.goalBar:SetWidth(requiredWidth - 24) end
+
+    -- Apply independent Window Scale (%)
+    local newScale = scalePct / 100
     local oldScale = uiFrame:GetScale() or 1
     if math.abs(newScale - oldScale) > 0.001 then
         local left = uiFrame:GetLeft()
@@ -265,7 +282,7 @@ local function ApplyLayoutMode()
         end
 
         uiFrame.compactText:Show()
-        uiFrame:SetHeight(52)
+        uiFrame:SetHeight(math.max(52, fontSize + 38))
         return
     end
 
@@ -283,7 +300,8 @@ local function ApplyLayoutMode()
     uiFrame.resetBtn:Show()
     uiFrame.postBtn:Show()
 
-    local rowStep = 16
+    local fontSize = tonumber(ns.db.timerFontSize) or BASE_FONT_SIZE
+    local rowStep = math.max(16, fontSize + 5)
     local y = 0
 
     if dungeonMode then
@@ -445,11 +463,22 @@ local function UpdateDisplay()
     if goalCopper > 0 then
         local pct = math.max(0, (netCopper / goalCopper) * 100)
         uiFrame.goalBar:SetValue(math.min(pct, 100))
-        if pct >= 100 then
-            uiFrame.goalBar:SetStatusBarColor(0.15, 0.85, 0.25, 0.9)
+
+        if ns.db.goalBarColorMode == "completion" then
+            if pct < 25 then
+                uiFrame.goalBar:SetStatusBarColor(0.90, 0.20, 0.20, 0.95) -- Red
+            elseif pct < 50 then
+                uiFrame.goalBar:SetStatusBarColor(0.95, 0.55, 0.15, 0.95) -- Orange
+            elseif pct < 75 then
+                uiFrame.goalBar:SetStatusBarColor(0.95, 0.85, 0.15, 0.95) -- Yellow
+            else
+                uiFrame.goalBar:SetStatusBarColor(0.15, 0.85, 0.25, 0.95) -- Green
+            end
         else
-            uiFrame.goalBar:SetStatusBarColor(0.0, 0.72, 0.95, 0.9)
+            local c = ns.db.goalBarColor or { r = 0.0, g = 0.72, b = 0.95 }
+            uiFrame.goalBar:SetStatusBarColor(c.r or 0.0, c.g or 0.72, c.b or 0.95, 0.95)
         end
+
         uiFrame.goalBar.text:SetText(string.format("Goal: %s / %s (%.0f%%)", Utils.FormatMoneyPlain(math.max(0, netCopper)), Utils.FormatMoneyPlain(goalCopper), pct))
     else
         uiFrame.goalBar:SetValue(0)
@@ -1015,20 +1044,20 @@ local function CreateTimerUI()
         if btn ~= "LeftButton" or ns.db.timerLocked then return end
         local startScale = f:GetScale() or 1
         local screenLeft = (f:GetLeft() or 0) * startScale
+        local baseW      = f:GetWidth() or BASE_WIDTH
         local uiScale    = UIParent:GetEffectiveScale()
 
         self:SetScript("OnUpdate", function()
             local cx = GetCursorPosition() / uiScale
             local desiredWidth = cx - screenLeft
-            local newScale = desiredWidth / BASE_WIDTH
-            local newPx = math.floor((newScale * BASE_FONT_SIZE) + 0.5)
-            if newPx < 8 then newPx = 8 elseif newPx > 64 then newPx = 64 end
+            local newPct = math.floor(((desiredWidth / baseW) * 100) + 0.5)
+            if newPct < 30 then newPct = 30 elseif newPct > 300 then newPct = 300 end
 
-            if newPx ~= ns.db.timerFontSize then
-                ns.db.timerFontSize = newPx
+            if newPct ~= ns.db.timerWindowScale then
+                ns.db.timerWindowScale = newPct
                 ApplyFontSize()
                 local optMod = ns.Modules["Options"]
-                if optMod and optMod.SyncFontSize then optMod:SyncFontSize(newPx) end
+                if optMod and optMod.SyncWindowScale then optMod:SyncWindowScale(newPct) end
             end
         end)
     end)
